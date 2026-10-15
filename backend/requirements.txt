@@ -6,3 +6,4 @@ torch
 torchvision
 Pillow
 opencv-python-headless
+requests
