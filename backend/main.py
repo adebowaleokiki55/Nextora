@@ -9,6 +9,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from plasmosenet import PlasmoSENet
+import base64
+import cv2
+
+from backend.smear_analysis import analyze_smear
 
 # Resolve paths from this file, not the terminal's working directory.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -158,3 +162,66 @@ def predict(file: UploadFile = File(...)):
             status_code=500,
             detail="Prediction failed. Check the backend logs.",
         )
+
+
+@app.post("/api/analyze-smear")
+async def analyze_smear_endpoint(file: UploadFile = File(...)):
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a JPEG, PNG, or WebP microscopy image.",
+        )
+
+    image_bytes = await file.read(10 * 1024 * 1024 + 1)
+
+    if not image_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded image is empty.",
+        )
+
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail="Image must be 10 MB or smaller.",
+        )
+
+    try:
+        result = analyze_smear(
+            image_bytes=image_bytes,
+            model=model,
+            device=DEVICE,
+        )
+
+        annotated_base64 = base64.b64encode(
+            result.pop("annotated_image")
+        ).decode("ascii")
+
+        result["annotated_image_base64"] = annotated_base64
+        result["annotated_image_mime_type"] = "image/png"
+
+        return result
+
+    except (ValueError, cv2.error) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not analyze this image: {exc}",
+        ) from exc
+    
+    except Exception as exc:
+      import traceback
+      traceback.print_exc()
+
+      raise HTTPException(
+        status_code=500,
+        detail=f"Smear analysis failed: {type(exc).__name__}: {exc}",
+    ) from exc
+
+
+
