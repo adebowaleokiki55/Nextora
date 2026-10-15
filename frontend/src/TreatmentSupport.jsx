@@ -9,6 +9,8 @@ import {
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import "./TreatmentSupport.css";
 
 const API_URL =
@@ -62,9 +64,39 @@ function buildPayload(form) {
 }
 
 function humanizeStatus(value = "") {
-  return value
+  return String(value)
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function normalizeAgentMarkdown(value = "") {
+  return String(value)
+    .replace(/\\<br\s*\/?>/gi, "\n")
+    .replace(/&lt;br\s*\/?&gt;/gi, "\n")
+    .replace(/\\([*_|`#~])/g, "$1")
+    .replace(/\r\n/g, "\n")
+    .trim();
+}
+
+function MarkdownExplanation({ content }) {
+  const markdown = normalizeAgentMarkdown(content);
+
+  return (
+    <div className="ts-agent-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ children, ...props }) => (
+            <a {...props} target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {markdown || "No explanation was returned."}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 export default function TreatmentSupport() {
@@ -122,7 +154,9 @@ export default function TreatmentSupport() {
 
   async function requestAgentReport() {
     if (!assessment) {
-      setError("Run the treatment assessment before requesting an AI explanation.");
+      setError(
+        "Run the treatment assessment before requesting an AI explanation."
+      );
       return;
     }
 
@@ -146,8 +180,13 @@ export default function TreatmentSupport() {
 
       if (!response.ok) {
         throw new Error(
-          data.detail ||
-            "The AI explanation could not be generated."
+          data.detail || "The AI explanation could not be generated."
+        );
+      }
+
+      if (!data.explanation) {
+        throw new Error(
+          "The AI service returned no explanation. Please try again."
         );
       }
 
@@ -185,10 +224,10 @@ export default function TreatmentSupport() {
       <div className="ts-safety-note">
         <ShieldAlert size={19} />
         <p>
-          Nextora's image prediction does not confirm malaria.
-          Enter clinical information from an appropriate assessment
-          and laboratory report. This prototype is not clinically
-          validated and does not prescribe medication.
+          Nextora's image prediction does not confirm malaria. Enter
+          clinical information from an appropriate assessment and
+          laboratory report. This prototype is not clinically validated
+          and does not prescribe medication.
         </p>
       </div>
 
@@ -210,6 +249,7 @@ export default function TreatmentSupport() {
               or laboratory
             </span>
           </label>
+
           <small>
             This checkbox is user-reported; Nextora does not independently
             verify a laboratory result.
@@ -318,6 +358,7 @@ export default function TreatmentSupport() {
                         : current.pregnancy_trimester
                       : "not_applicable",
                 }));
+
                 setError("");
               }}
             >
@@ -363,7 +404,9 @@ export default function TreatmentSupport() {
                 )
               }
             />
-            <small>Do not estimate this from Nextora's candidate counts.</small>
+            <small>
+              Do not estimate this from Nextora's candidate counts.
+            </small>
           </div>
 
           <div className="ts-field ts-full">
@@ -380,9 +423,7 @@ export default function TreatmentSupport() {
           </div>
 
           <div className="ts-field ts-full">
-            <label htmlFor="ts-medications">
-              Current medications
-            </label>
+            <label htmlFor="ts-medications">Current medications</label>
             <input
               id="ts-medications"
               type="text"
@@ -448,25 +489,30 @@ export default function TreatmentSupport() {
             </div>
           )}
 
-          <div className="ts-recommendation">
-            <h4>Recommendation</h4>
-            <p>{assessment.recommendation}</p>
-          </div>
+          {assessment.recommendation && (
+            <div className="ts-recommendation">
+              <h4>Recommendation</h4>
+              <p>{assessment.recommendation}</p>
+            </div>
+          )}
 
           {assessment.medication && (
             <div className="ts-medication">
               <h4>Medication pathway under review</h4>
+
               {assessment.medication.class && (
                 <p>
                   <strong>Class:</strong> {assessment.medication.class}
                 </p>
               )}
+
               {assessment.medication.candidate_regimen && (
                 <p>
                   <strong>Candidate regimen:</strong>{" "}
                   {assessment.medication.candidate_regimen}
                 </p>
               )}
+
               {assessment.medication.selection_status && (
                 <p>
                   <strong>Status:</strong>{" "}
@@ -532,18 +578,22 @@ export default function TreatmentSupport() {
                 {assessment.protocol.publisher},{" "}
                 {assessment.protocol.year}
               </p>
+
               {assessment.protocol.dosing_table_verified === false && (
                 <p className="ts-unverified">
                   Dosing table not verified in this application.
                 </p>
               )}
-              <a
-                href={assessment.protocol.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open protocol reference ↗
-              </a>
+
+              {assessment.protocol.url && (
+                <a
+                  href={assessment.protocol.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open protocol reference ↗
+                </a>
+              )}
             </div>
           )}
 
@@ -569,7 +619,8 @@ export default function TreatmentSupport() {
                 <Sparkles size={17} />
                 AI explanation
               </h4>
-              <p>{agentReport.explanation}</p>
+
+              <MarkdownExplanation content={agentReport.explanation} />
 
               <div className="ts-agent-meta">
                 <CheckCircle2 size={15} />
@@ -579,9 +630,11 @@ export default function TreatmentSupport() {
                   : ""}
               </div>
 
-              <p className="ts-agent-disclaimer">
-                {agentReport.disclaimer}
-              </p>
+              {agentReport.disclaimer && (
+                <p className="ts-agent-disclaimer">
+                  {agentReport.disclaimer}
+                </p>
+              )}
             </div>
           )}
 

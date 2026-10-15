@@ -464,3 +464,87 @@
     max-width: 100%;
   }
 }
+
+.ts-agent-markdown {
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.ts-agent-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ts-agent-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.ts-agent-markdown h1,
+.ts-agent-markdown h2,
+.ts-agent-markdown h3,
+.ts-agent-markdown h4 {
+  margin: 20px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.ts-agent-markdown p {
+  margin: 10px 0;
+}
+
+.ts-agent-markdown ul,
+.ts-agent-markdown ol {
+  padding-left: 22px;
+  margin: 10px 0;
+}
+
+.ts-agent-markdown li {
+  margin: 5px 0;
+}
+
+.ts-agent-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 14px 0;
+  font-size: 13px;
+}
+
+.ts-agent-markdown th,
+.ts-agent-markdown td {
+  padding: 9px 11px;
+  border: 1px solid var(--border-color, #dfe5eb);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ts-agent-markdown th {
+  font-weight: 700;
+  background: var(--surface-color, #f5f7fa);
+}
+
+.ts-agent-markdown strong {
+  font-weight: 700;
+}
+
+.ts-agent-markdown a {
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+}
+
+.ts-agent-markdown blockquote {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--border-color, #aab8c8);
+  background: var(--surface-color, #f5f7fa);
+}
+
+.ts-agent-markdown code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--surface-color, #f0f2f5);
+  font-size: 0.9em;
+}
