@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -15,12 +14,16 @@ import {
   ShieldCheck,
   UploadCloud,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import "./App.css";
+import TreatmentSupport from "./TreatmentSupport";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const MAX_SIZE = 10 * 1024 * 1024;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const INITIAL_CANDIDATES_VISIBLE = 5;
 
 export default function App() {
   const inputRef = useRef(null);
@@ -41,6 +44,9 @@ export default function App() {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [fitScale, setFitScale] = useState(1);
+
+  // Keep the long smear candidate list collapsed by default.
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
 
   const isSmearMode = analysisMode === "smear";
   const annotatedImage = isSmearMode
@@ -78,6 +84,7 @@ export default function App() {
     setError("");
     setResult(null);
     setDimensions(null);
+    setShowAllCandidates(false);
 
     if (!ACCEPTED_TYPES.includes(selectedFile.type)) {
       setError("Choose a JPEG, PNG, or WebP image.");
@@ -176,6 +183,7 @@ export default function App() {
     setAnalysisMode(mode);
     setResult(null);
     setError("");
+    setShowAllCandidates(false);
     resetView();
   }
 
@@ -188,6 +196,7 @@ export default function App() {
     setZoom(1);
     setPosition({ x: 0, y: 0 });
     setDragging(false);
+    setShowAllCandidates(false);
     dragRef.current = null;
 
     if (inputRef.current) inputRef.current.value = "";
@@ -200,6 +209,7 @@ export default function App() {
     setLoading(true);
     setError("");
     setResult(null);
+    setShowAllCandidates(false);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -249,6 +259,10 @@ export default function App() {
   );
 
   const smearCells = Array.isArray(result?.cells) ? result.cells : [];
+
+  const visibleSmearCells = showAllCandidates
+    ? smearCells
+    : smearCells.slice(0, INITIAL_CANDIDATES_VISIBLE);
 
   return (
     <div className="app-shell explorer-shell">
@@ -340,9 +354,11 @@ export default function App() {
               {displayedImage ? (
                 <img
                   ref={imageRef}
-                  key={displayedImage.startsWith("data:image/png;base64,")
-                    ? "annotated"
-                    : preview}
+                  key={
+                    displayedImage.startsWith("data:image/png;base64,")
+                      ? "annotated"
+                      : preview
+                  }
                   className="microscopy-image"
                   src={displayedImage}
                   alt={
@@ -755,7 +771,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="score-heading">
+                  <div className="score-heading candidate-section-heading">
                     <h3>Candidate predictions</h3>
                     <span>{smearCells.length} regions</span>
                   </div>
@@ -766,48 +782,73 @@ export default function App() {
                       establish that the image is free of infected cells.
                     </div>
                   ) : (
-                    <div className="candidate-list">
-                      {smearCells.map((cell) => (
-                        <div className="candidate-item" key={cell.cell_id}>
-                          <div className="candidate-topline">
-                            <strong>Candidate #{cell.cell_id}</strong>
+                    <>
+                      <div className="candidate-list">
+                        {visibleSmearCells.map((cell) => (
+                          <div className="candidate-item" key={cell.cell_id}>
+                            <div className="candidate-topline">
+                              <strong>Candidate #{cell.cell_id}</strong>
 
-                            <span
-                              className={`candidate-badge ${
-                                cell.predicted_class === 0
-                                  ? "infected-badge"
-                                  : "healthy-badge"
-                              }`}
-                            >
-                              {cell.predicted_class === 0
-                                ? "Infected class"
-                                : "Uninfected class"}
-                            </span>
-                          </div>
+                              <span
+                                className={`candidate-badge ${
+                                  cell.predicted_class === 0
+                                    ? "infected-badge"
+                                    : "healthy-badge"
+                                }`}
+                              >
+                                {cell.predicted_class === 0
+                                  ? "Infected class"
+                                  : "Uninfected class"}
+                              </span>
+                            </div>
 
-                          <div className="candidate-details">
-                            <span>Model score</span>
-                            <strong>
-                              {Number(cell.confidence).toFixed(2)}%
-                            </strong>
-                          </div>
+                            <div className="candidate-details">
+                              <span>Model score</span>
+                              <strong>
+                                {Number(cell.confidence).toFixed(2)}%
+                              </strong>
+                            </div>
 
-                          <div className="candidate-details">
-                            <span>Region size</span>
-                            <span>
-                              {cell.box.width} × {cell.box.height} px
-                            </span>
-                          </div>
+                            <div className="candidate-details">
+                              <span>Region size</span>
+                              <span>
+                                {cell.box.width} × {cell.box.height} px
+                              </span>
+                            </div>
 
-                          <div className="candidate-details">
-                            <span>Position</span>
-                            <span>
-                              x: {cell.box.x}, y: {cell.box.y}
-                            </span>
+                            <div className="candidate-details">
+                              <span>Position</span>
+                              <span>
+                                x: {cell.box.x}, y: {cell.box.y}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+
+                      {smearCells.length > INITIAL_CANDIDATES_VISIBLE && (
+                        <button
+                          type="button"
+                          className="candidate-toggle-button"
+                          onClick={() =>
+                            setShowAllCandidates((current) => !current)
+                          }
+                          aria-expanded={showAllCandidates}
+                        >
+                          {showAllCandidates ? (
+                            <>
+                              <ChevronUp size={17} />
+                              Show fewer candidates
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown size={17} />
+                              View all {smearCells.length} candidate regions
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </>
                   )}
 
                   <div className="disclaimer smear-disclaimer">
@@ -867,6 +908,11 @@ export default function App() {
             </section>
           </aside>
         </div>
+
+        {/* Treatment support now appears before the page footer. */}
+        <section className="treatment-support-section" id="treatment-support">
+          <TreatmentSupport />
+        </section>
 
         <footer className="page-footer">
           <span>Nextora · Powered by PlasmoSENet</span>
