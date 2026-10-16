@@ -1,7 +1,14 @@
-
 import os
+
+# Set these BEFORE importing PyTorch, OpenCV, or numerical libraries.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import base64
 import json
+import threading
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
@@ -24,13 +31,31 @@ from backend.treatment_engine import (
 
 
 # ==================================================
-# CONFIGURATION
+# RESOURCE LIMITS AND CONFIGURATION
 # ==================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "model.pth"
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+# Reject images with excessive dimensions before expensive processing.
+MAX_IMAGE_PIXELS = 12_000_000
+
+# Only one request at a time may run local model inference.
+# This helps prevent multiple image requests from increasing peak RAM.
+INFERENCE_LOCK = threading.BoundedSemaphore(value=1)
+
+# Keep CPU thread usage low on the Render free instance.
+torch.set_num_threads(1)
+
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    # PyTorch may already have initialized its inter-op thread pool.
+    pass
+
+cv2.setNumThreads(0)
 
 OLLAMA_URL = os.getenv(
     "OLLAMA_URL",
@@ -60,7 +85,7 @@ DEVICE = torch.device(
 
 app = FastAPI(
     title="Nextora AI API",
-    version="1.5.0",
+    version="1.6.0",
     description=(
         "Malaria microscopy research prototype with image "
         "classification, a tool-using research assistant, and "
@@ -83,6 +108,90 @@ app.add_middleware(
 
 
 # ==================================================
+# MEMORY DIAGNOSTICS
+# ==================================================
+
+def read_process_memory() -> dict:
+    """
+    Read Linux process memory information without adding psutil.
+
+    Render runs Linux. If /proc is unavailable, return a diagnostic
+    error instead of causing the health endpoint to fail.
+    """
+    result = {
+        "rss_mb": None,
+        "peak_rss_mb": None,
+        "threads": None,
+        "cgroup_memory_current_mb": None,
+        "cgroup_memory_limit_mb": None,
+    }
+
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as file:
+            for line in file:
+                if line.startswith("VmRSS:"):
+                    result["rss_mb"] = round(
+                        int(line.split()[1]) / 1024,
+                        2,
+                    )
+                elif line.startswith("VmHWM:"):
+                    result["peak_rss_mb"] = round(
+                        int(line.split()[1]) / 1024,
+                        2,
+                    )
+                elif line.startswith("Threads:"):
+                    result["threads"] = int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+
+    # cgroup v2 memory counters, commonly available on Linux hosts.
+    try:
+        with open(
+            "/sys/fs/cgroup/memory.current",
+            "r",
+            encoding="utf-8",
+        ) as file:
+            result["cgroup_memory_current_mb"] = round(
+                int(file.read().strip()) / (1024 * 1024),
+                2,
+            )
+    except (OSError, ValueError):
+        pass
+
+    try:
+        with open(
+            "/sys/fs/cgroup/memory.max",
+            "r",
+            encoding="utf-8",
+        ) as file:
+            value = file.read().strip()
+
+            if value != "max":
+                result["cgroup_memory_limit_mb"] = round(
+                    int(value) / (1024 * 1024),
+                    2,
+                )
+    except (OSError, ValueError):
+        pass
+
+    return result
+
+
+@app.get("/api/diagnostics/memory")
+def memory_diagnostics():
+    """
+    Report process RAM usage and current inference-lock status.
+    This endpoint does not run model inference.
+    """
+    return {
+        "status": "ok",
+        "memory": read_process_memory(),
+        "inference_busy": INFERENCE_LOCK.locked(),
+        "device": str(DEVICE),
+    }
+
+
+# ==================================================
 # IMAGE PREPROCESSING
 # ==================================================
 
@@ -94,6 +203,62 @@ transform = transforms.Compose([
         std=[0.229, 0.224, 0.225],
     ),
 ])
+
+
+def validate_image_dimensions(image_bytes: bytes) -> None:
+    """Reject invalid or excessively large images before inference."""
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            width, height = image.size
+
+            if width <= 0 or height <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="The image dimensions are invalid.",
+                )
+
+            if width * height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        "The image dimensions are too large. "
+                        "Please upload an image containing no more "
+                        "than 12 million pixels."
+                    ),
+                )
+
+            image.verify()
+
+    except HTTPException:
+        raise
+
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file could not be processed as an image.",
+        ) from exc
+
+
+def acquire_inference_slot() -> None:
+    """
+    Avoid queuing multiple image requests in memory.
+
+    Return a retryable response if another request is already using
+    the model rather than letting concurrent requests pile up.
+    """
+    if not INFERENCE_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The image-analysis service is busy. "
+                "Please wait a few seconds and try again."
+            ),
+            headers={"Retry-After": "5"},
+        )
 
 
 # ==================================================
@@ -159,26 +324,25 @@ def predict(file: UploadFile = File(...)):
             detail="Upload a JPEG, PNG, or WebP image.",
         )
 
-    try:
-        image_bytes = file.file.read(
-            MAX_UPLOAD_BYTES + 1
+    image_bytes = file.file.read(MAX_UPLOAD_BYTES + 1)
+
+    if not image_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="The file is empty.",
         )
 
-        if not image_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail="The file is empty.",
-            )
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Image exceeds the 10 MB upload limit.",
+        )
 
-        if len(image_bytes) > MAX_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail="Image exceeds the 10 MB upload limit.",
-            )
+    validate_image_dimensions(image_bytes)
 
-        with Image.open(BytesIO(image_bytes)) as check_image:
-            check_image.verify()
+    acquire_inference_slot()
 
+    try:
         with Image.open(BytesIO(image_bytes)) as source:
             image = source.convert("RGB")
 
@@ -231,13 +395,13 @@ def predict(file: UploadFile = File(...)):
         UnidentifiedImageError,
         OSError,
         ValueError,
-    ):
+    ) as exc:
         raise HTTPException(
             status_code=400,
             detail=(
                 "The uploaded file could not be processed as an image."
             ),
-        )
+        ) from exc
 
     except Exception as exc:
         print(
@@ -247,7 +411,10 @@ def predict(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=500,
             detail="Prediction failed. Check the backend logs.",
-        )
+        ) from exc
+
+    finally:
+        INFERENCE_LOCK.release()
 
 
 # ==================================================
@@ -272,9 +439,7 @@ async def analyze_smear_endpoint(
             ),
         )
 
-    image_bytes = await file.read(
-        MAX_UPLOAD_BYTES + 1
-    )
+    image_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
 
     if not image_bytes:
         raise HTTPException(
@@ -287,6 +452,9 @@ async def analyze_smear_endpoint(
             status_code=413,
             detail="Image must be 10 MB or smaller.",
         )
+
+    validate_image_dimensions(image_bytes)
+    acquire_inference_slot()
 
     try:
         result = analyze_smear(
@@ -306,6 +474,9 @@ async def analyze_smear_endpoint(
 
         return result
 
+    except HTTPException:
+        raise
+
     except (ValueError, cv2.error) as exc:
         raise HTTPException(
             status_code=400,
@@ -321,6 +492,9 @@ async def analyze_smear_endpoint(
             status_code=500,
             detail="Smear analysis failed. Check the backend logs.",
         ) from exc
+
+    finally:
+        INFERENCE_LOCK.release()
 
 
 # ==================================================
