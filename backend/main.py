@@ -1,12 +1,14 @@
+
 import os
 
-# Set these BEFORE importing PyTorch, OpenCV, or numerical libraries.
+# Set these before importing numerical libraries.
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import base64
+import gc
 import json
 import threading
 from io import BytesIO
@@ -38,21 +40,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "model.pth"
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-
-# Reject images with excessive dimensions before expensive processing.
 MAX_IMAGE_PIXELS = 12_000_000
 
-# Only one request at a time may run local model inference.
-# This helps prevent multiple image requests from increasing peak RAM.
+# Limit concurrent inference to protect the Render instance.
 INFERENCE_LOCK = threading.BoundedSemaphore(value=1)
 
-# Keep CPU thread usage low on the Render free instance.
+# Separate status tracking because BoundedSemaphore.locked()
+# is not available in every supported Python runtime.
+INFERENCE_STATE_LOCK = threading.Lock()
+INFERENCE_BUSY = False
+
 torch.set_num_threads(1)
 
 try:
     torch.set_num_interop_threads(1)
 except RuntimeError:
-    # PyTorch may already have initialized its inter-op thread pool.
     pass
 
 cv2.setNumThreads(0)
@@ -74,9 +76,9 @@ CLASS_NAMES = {
     1: "Uninfected",
 }
 
-DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)
+# Render's free instance is CPU-based and memory-constrained.
+# Explicit CPU inference avoids accidental GPU initialization.
+DEVICE = torch.device("cpu")
 
 
 # ==================================================
@@ -85,7 +87,7 @@ DEVICE = torch.device(
 
 app = FastAPI(
     title="Nextora AI API",
-    version="1.6.0",
+    version="1.7.0",
     description=(
         "Malaria microscopy research prototype with image "
         "classification, a tool-using research assistant, and "
@@ -108,16 +110,43 @@ app.add_middleware(
 
 
 # ==================================================
+# INFERENCE LOCK MANAGEMENT
+# ==================================================
+
+def acquire_inference_slot() -> None:
+    global INFERENCE_BUSY
+
+    if not INFERENCE_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The image-analysis service is busy. "
+                "Please wait a few seconds and try again."
+            ),
+            headers={"Retry-After": "5"},
+        )
+
+    with INFERENCE_STATE_LOCK:
+        INFERENCE_BUSY = True
+
+
+def release_inference_slot() -> None:
+    global INFERENCE_BUSY
+
+    with INFERENCE_STATE_LOCK:
+        INFERENCE_BUSY = False
+
+    INFERENCE_LOCK.release()
+
+    # Encourage release of temporary Python objects.
+    gc.collect()
+
+
+# ==================================================
 # MEMORY DIAGNOSTICS
 # ==================================================
 
 def read_process_memory() -> dict:
-    """
-    Read Linux process memory information without adding psutil.
-
-    Render runs Linux. If /proc is unavailable, return a diagnostic
-    error instead of causing the health endpoint to fail.
-    """
     result = {
         "rss_mb": None,
         "peak_rss_mb": None,
@@ -144,7 +173,6 @@ def read_process_memory() -> dict:
     except (OSError, ValueError, IndexError):
         pass
 
-    # cgroup v2 memory counters, commonly available on Linux hosts.
     try:
         with open(
             "/sys/fs/cgroup/memory.current",
@@ -179,14 +207,13 @@ def read_process_memory() -> dict:
 
 @app.get("/api/diagnostics/memory")
 def memory_diagnostics():
-    """
-    Report process RAM usage and current inference-lock status.
-    This endpoint does not run model inference.
-    """
+    with INFERENCE_STATE_LOCK:
+        inference_busy = INFERENCE_BUSY
+
     return {
         "status": "ok",
         "memory": read_process_memory(),
-        "inference_busy": INFERENCE_LOCK.locked(),
+        "inference_busy": inference_busy,
         "device": str(DEVICE),
     }
 
@@ -206,7 +233,6 @@ transform = transforms.Compose([
 
 
 def validate_image_dimensions(image_bytes: bytes) -> None:
-    """Reject invalid or excessively large images before inference."""
     try:
         with Image.open(BytesIO(image_bytes)) as image:
             width, height = image.size
@@ -243,22 +269,23 @@ def validate_image_dimensions(image_bytes: bytes) -> None:
         ) from exc
 
 
-def acquire_inference_slot() -> None:
-    """
-    Avoid queuing multiple image requests in memory.
+def read_upload(file: UploadFile) -> bytes:
+    """Read at most the configured upload limit plus one byte."""
+    image_bytes = file.file.read(MAX_UPLOAD_BYTES + 1)
 
-    Return a retryable response if another request is already using
-    the model rather than letting concurrent requests pile up.
-    """
-    if not INFERENCE_LOCK.acquire(blocking=False):
+    if not image_bytes:
         raise HTTPException(
-            status_code=503,
-            detail=(
-                "The image-analysis service is busy. "
-                "Please wait a few seconds and try again."
-            ),
-            headers={"Retry-After": "5"},
+            status_code=400,
+            detail="The uploaded file is empty.",
         )
+
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Image exceeds the 10 MB upload limit.",
+        )
+
+    return image_bytes
 
 
 # ==================================================
@@ -275,13 +302,16 @@ def load_model():
 
     state_dict = torch.load(
         MODEL_PATH,
-        map_location=DEVICE,
+        map_location="cpu",
         weights_only=True,
     )
 
     loaded_model.load_state_dict(state_dict)
     loaded_model.to(DEVICE)
     loaded_model.eval()
+
+    del state_dict
+    gc.collect()
 
     return loaded_model
 
@@ -324,23 +354,15 @@ def predict(file: UploadFile = File(...)):
             detail="Upload a JPEG, PNG, or WebP image.",
         )
 
-    image_bytes = file.file.read(MAX_UPLOAD_BYTES + 1)
-
-    if not image_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="The file is empty.",
-        )
-
-    if len(image_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="Image exceeds the 10 MB upload limit.",
-        )
-
+    image_bytes = read_upload(file)
     validate_image_dimensions(image_bytes)
 
     acquire_inference_slot()
+
+    image = None
+    input_tensor = None
+    logits = None
+    probabilities = None
 
     try:
         with Image.open(BytesIO(image_bytes)) as source:
@@ -356,18 +378,26 @@ def predict(file: UploadFile = File(...)):
             logits = model(input_tensor)
             probabilities = torch.softmax(logits, dim=1)[0]
 
-        if probabilities.numel() != 2:
-            raise RuntimeError(
-                "Unexpected model output shape."
+            if probabilities.numel() != 2:
+                raise RuntimeError(
+                    "Unexpected model output shape."
+                )
+
+            predicted_class = int(
+                torch.argmax(probabilities).item()
             )
 
-        predicted_class = int(
-            torch.argmax(probabilities).item()
-        )
+            confidence = float(
+                probabilities[predicted_class].item()
+            )
 
-        confidence = float(
-            probabilities[predicted_class].item()
-        )
+            infected_probability = float(
+                probabilities[0].item()
+            )
+
+            uninfected_probability = float(
+                probabilities[1].item()
+            )
 
         return {
             "predicted_class": predicted_class,
@@ -375,10 +405,10 @@ def predict(file: UploadFile = File(...)):
             "confidence": round(confidence * 100, 2),
             "probabilities": {
                 "parasitized": round(
-                    float(probabilities[0]) * 100, 2
+                    infected_probability * 100, 2
                 ),
                 "uninfected": round(
-                    float(probabilities[1]) * 100, 2
+                    uninfected_probability * 100, 2
                 ),
             },
             "model": "PlasmoSENet",
@@ -398,9 +428,7 @@ def predict(file: UploadFile = File(...)):
     ) as exc:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "The uploaded file could not be processed as an image."
-            ),
+            detail="The uploaded file could not be processed as an image.",
         ) from exc
 
     except Exception as exc:
@@ -414,7 +442,12 @@ def predict(file: UploadFile = File(...)):
         ) from exc
 
     finally:
-        INFERENCE_LOCK.release()
+        image = None
+        input_tensor = None
+        logits = None
+        probabilities = None
+        gc.collect()
+        release_inference_slot()
 
 
 # ==================================================
@@ -425,18 +458,14 @@ def predict(file: UploadFile = File(...)):
 async def analyze_smear_endpoint(
     file: UploadFile = File(...),
 ):
-    allowed_types = {
+    if file.content_type not in {
         "image/jpeg",
         "image/png",
         "image/webp",
-    }
-
-    if file.content_type not in allowed_types:
+    }:
         raise HTTPException(
-            status_code=400,
-            detail=(
-                "Upload a JPEG, PNG, or WebP microscopy image."
-            ),
+            status_code=415,
+            detail="Upload a JPEG, PNG, or WebP microscopy image.",
         )
 
     image_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -456,6 +485,9 @@ async def analyze_smear_endpoint(
     validate_image_dimensions(image_bytes)
     acquire_inference_slot()
 
+    result = None
+    annotated_image = None
+
     try:
         result = analyze_smear(
             image_bytes=image_bytes,
@@ -463,14 +495,20 @@ async def analyze_smear_endpoint(
             device=DEVICE,
         )
 
-        annotated_image = result.pop("annotated_image")
+        annotated_image = result.pop("annotated_image", None)
 
-        result["annotated_image_base64"] = (
-            base64.b64encode(annotated_image)
-            .decode("ascii")
-        )
+        if annotated_image is not None:
+            # Preserve the original function's expected output format:
+            # analyze_smear should return PNG-encoded image bytes.
+            if not isinstance(annotated_image, bytes):
+                raise RuntimeError(
+                    "analyze_smear returned an unexpected annotated image type."
+                )
 
-        result["annotated_image_mime_type"] = "image/png"
+            result["annotated_image_base64"] = (
+                base64.b64encode(annotated_image).decode("ascii")
+            )
+            result["annotated_image_mime_type"] = "image/png"
 
         return result
 
@@ -494,7 +532,11 @@ async def analyze_smear_endpoint(
         ) from exc
 
     finally:
-        INFERENCE_LOCK.release()
+        result = None
+        annotated_image = None
+        image_bytes = b""
+        gc.collect()
+        release_inference_slot()
 
 
 # ==================================================
@@ -514,8 +556,6 @@ def inspect_analysis_evidence(
     mode: str,
     analysis: dict,
 ) -> dict:
-    """Summarize actual outputs supplied by Nextora."""
-
     if mode == "single_cell":
         required_fields = [
             "predicted_class",
@@ -565,9 +605,7 @@ def inspect_analysis_evidence(
         "mode": mode,
         "image_width": analysis.get("image_width"),
         "image_height": analysis.get("image_height"),
-        "reported_candidate_count": analysis.get(
-            "candidate_count"
-        ),
+        "reported_candidate_count": analysis.get("candidate_count"),
         "reported_infected_count": analysis.get(
             "candidate_infected_count"
         ),
@@ -594,13 +632,10 @@ def check_analysis_uncertainty(
     mode: str,
     analysis: dict,
 ) -> dict:
-    """Run deterministic checks, not clinical validation."""
-
     issues = []
     checks = {}
 
     if mode == "single_cell":
-        prediction = analysis.get("prediction")
         confidence = analysis.get("confidence")
         probabilities = analysis.get("probabilities")
 
@@ -608,13 +643,9 @@ def check_analysis_uncertainty(
             not isinstance(confidence, (int, float))
             or isinstance(confidence, bool)
         ):
-            issues.append(
-                "Confidence is missing or not numeric."
-            )
+            issues.append("Confidence is missing or not numeric.")
         elif not 0 <= confidence <= 100:
-            issues.append(
-                "Confidence is outside the 0–100 range."
-            )
+            issues.append("Confidence is outside the 0–100 range.")
         else:
             checks["confidence_in_valid_range"] = True
 
@@ -632,21 +663,13 @@ def check_analysis_uncertainty(
             )
 
             if not valid_probabilities:
-                issues.append(
-                    "Class probabilities are missing or invalid."
-                )
+                issues.append("Class probabilities are missing or invalid.")
             else:
                 total = p_infected + p_uninfected
+                checks["probability_total_percent"] = round(total, 2)
+                checks["probabilities_sum_to_100"] = abs(total - 100) <= 1
 
-                checks["probability_total_percent"] = round(
-                    total, 2
-                )
-
-                checks["probabilities_sum_to_100"] = (
-                    abs(total - 100) <= 1.0
-                )
-
-                if abs(total - 100) > 1.0:
+                if abs(total - 100) > 1:
                     issues.append(
                         "Class probabilities do not sum to approximately 100%."
                     )
@@ -654,10 +677,8 @@ def check_analysis_uncertainty(
                 predicted_class = analysis.get("predicted_class")
 
                 expected_confidence = (
-                    p_infected
-                    if predicted_class == 0
-                    else p_uninfected
-                    if predicted_class == 1
+                    p_infected if predicted_class == 0
+                    else p_uninfected if predicted_class == 1
                     else None
                 )
 
@@ -666,13 +687,11 @@ def check_analysis_uncertainty(
                     and not isinstance(confidence, bool)
                     and expected_confidence is not None
                 ):
-                    matches = (
-                        abs(confidence - expected_confidence) <= 1.0
-                    )
+                    matches = abs(
+                        confidence - expected_confidence
+                    ) <= 1
 
-                    checks[
-                        "confidence_matches_predicted_class"
-                    ] = matches
+                    checks["confidence_matches_predicted_class"] = matches
 
                     if not matches:
                         issues.append(
@@ -680,16 +699,13 @@ def check_analysis_uncertainty(
                             "for the predicted class."
                         )
 
-        if prediction not in {
+        if analysis.get("prediction") not in {
             "Parasitized (Infected)",
             "Uninfected",
         }:
-            issues.append(
-                "Prediction label is missing or unrecognized."
-            )
+            issues.append("Prediction label is missing or unrecognized.")
 
         checks["clinical_calibration_established"] = False
-
         issues.append(
             "The model's confidence has not been established as a "
             "calibrated clinical probability."
@@ -704,14 +720,10 @@ def check_analysis_uncertainty(
             or isinstance(candidate_count, bool)
             or candidate_count < 0
         ):
-            issues.append(
-                "Candidate-region count is missing or invalid."
-            )
+            issues.append("Candidate-region count is missing or invalid.")
 
         if not isinstance(cells, list):
-            issues.append(
-                "Cell result records are missing or invalid."
-            )
+            issues.append("Cell result records are missing or invalid.")
         else:
             checks["returned_cell_records"] = len(cells)
 
@@ -800,8 +812,6 @@ def ask_ollama(
     messages: list[dict],
     tools: list[dict] | None = None,
 ) -> dict:
-    """Send a chat request to Ollama Cloud."""
-
     if not OLLAMA_API_KEY:
         raise HTTPException(
             status_code=503,
@@ -886,10 +896,7 @@ def ask_ollama(
 
         raise HTTPException(
             status_code=502,
-            detail=(
-                "Ollama Cloud returned an HTTP error. "
-                "Check the backend logs."
-            ),
+            detail="Ollama Cloud returned an HTTP error. Check backend logs.",
         ) from exc
 
     except requests.Timeout as exc:
@@ -909,8 +916,7 @@ def ask_ollama(
 
     except requests.RequestException as exc:
         print(
-            f"Ollama Cloud request error: "
-            f"{type(exc).__name__}: {exc}"
+            f"Ollama Cloud request error: {type(exc).__name__}: {exc}"
         )
 
         raise HTTPException(
@@ -944,8 +950,6 @@ def execute_agent_tool(
     mode: str,
     analysis: dict,
 ) -> dict:
-    """Execute only explicitly approved analysis tools."""
-
     approved_tools = {
         "inspect_analysis_evidence": inspect_analysis_evidence,
         "check_analysis_uncertainty": check_analysis_uncertainty,
@@ -954,9 +958,7 @@ def execute_agent_tool(
     tool = approved_tools.get(tool_name)
 
     if tool is None:
-        raise ValueError(
-            f"Unapproved agent tool: {tool_name}"
-        )
+        raise ValueError(f"Unapproved agent tool: {tool_name}")
 
     return tool(mode, analysis)
 
@@ -966,23 +968,18 @@ def execute_agent_tool(
 # ==================================================
 
 @app.post("/api/agent/explain")
-def explain_analysis(
-    request: AgentExplainRequest,
-):
+def explain_analysis(request: AgentExplainRequest):
     mode = request.mode
     analysis = request.analysis
 
-    evidence = inspect_analysis_evidence(
-        mode,
-        analysis,
-    )
+    evidence = inspect_analysis_evidence(mode, analysis)
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are Nextora's research-assistant agent. "
-                "You MUST call both inspect_analysis_evidence and "
+                "You are Nextora's research-assistant agent. You MUST "
+                "call both inspect_analysis_evidence and "
                 "check_analysis_uncertainty before your final report. "
                 "Use their actual returned results. Never invent findings, "
                 "counts, or probabilities. Do not diagnose patients or "
@@ -1002,8 +999,7 @@ def explain_analysis(
             "content": (
                 f"Analyze this Nextora {mode} result. Call both required "
                 "Python tools, examine their results, and produce a concise "
-                "evidence-based report.\n\n"
-                "Supplied analysis:\n"
+                "evidence-based report.\n\nSupplied analysis:\n"
                 + json.dumps(analysis, ensure_ascii=False)
             ),
         },
@@ -1031,9 +1027,7 @@ def explain_analysis(
                         detail="Ollama Cloud returned an empty response.",
                     )
 
-                missing_tools = (
-                    required_tools - set(tools_executed)
-                )
+                missing_tools = required_tools - set(tools_executed)
 
                 if missing_tools:
                     messages.append(message)
@@ -1081,7 +1075,6 @@ def explain_analysis(
                         mode=mode,
                         analysis=analysis,
                     )
-
                     tool_results[tool_name] = result
                     tools_executed.append(tool_name)
                 else:
@@ -1123,21 +1116,17 @@ def explain_analysis(
 # ==================================================
 
 @app.post("/api/treatment/recommend")
-def recommend_treatment(
-    request: TreatmentRequest,
-):
+def recommend_treatment(request: TreatmentRequest):
     """
     Preliminary protocol-aware treatment decision support.
     Not a prescription or clinically validated system.
     """
-
     try:
         return assess_treatment(request)
 
     except Exception as exc:
         print(
-            f"Treatment assessment error: "
-            f"{type(exc).__name__}: {exc}"
+            f"Treatment assessment error: {type(exc).__name__}: {exc}"
         )
 
         raise HTTPException(
@@ -1172,21 +1161,17 @@ TREATMENT_AGENT_TOOLS = [
 
 
 @app.post("/api/agent/treatment-report")
-def treatment_agent_report(
-    request: TreatmentRequest,
-):
+def treatment_agent_report(request: TreatmentRequest):
     """
     Uses the deterministic treatment engine and Ollama Cloud
     to explain the assessment. Not a diagnosis or prescription.
     """
-
     try:
         assessment = assess_treatment(request)
 
     except Exception as exc:
         print(
-            f"Treatment assessment error: "
-            f"{type(exc).__name__}: {exc}"
+            f"Treatment assessment error: {type(exc).__name__}: {exc}"
         )
 
         raise HTTPException(
@@ -1253,9 +1238,7 @@ def treatment_agent_report(
                 if not explanation:
                     raise HTTPException(
                         status_code=502,
-                        detail=(
-                            "Ollama Cloud returned an empty response."
-                        ),
+                        detail="Ollama Cloud returned an empty response.",
                     )
 
                 if not tools_executed:
@@ -1263,9 +1246,8 @@ def treatment_agent_report(
                     messages.append({
                         "role": "user",
                         "content": (
-                            "You must call the approved "
-                            "assess_treatment tool before explaining "
-                            "the result."
+                            "You must call the approved assess_treatment "
+                            "tool before explaining the result."
                         ),
                     })
                     continue
@@ -1297,7 +1279,7 @@ def treatment_agent_report(
                         detail="The agent requested an unapproved tool.",
                     )
 
-                # The model cannot supply or change clinical parameters.
+                # Clinical parameters are never supplied by the model.
                 messages.append({
                     "role": "tool",
                     "tool_name": "assess_treatment",
