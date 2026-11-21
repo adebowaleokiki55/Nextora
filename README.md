@@ -1,414 +1,313 @@
-# Nextora — Experimental AI-Powered Malaria Blood Smear Analysis
+# Nextora — Malaria Early-Warning, Intelligence and Response Platform
 
-Nextora is a machine learning application that classifies blood cell images into parasitized and uninfected classes and provides experimental candidate-region analysis for whole blood-smear images.
+Nextora helps public-health teams anticipate rising malaria risk, spot facilities running out of essential supplies, and coordinate a response, with a human approving every consequential action. It joins five modules in one backend, one database, one alert system and one command-centre dashboard:
 
-The project combines a PyTorch image classification model with a FastAPI backend and a React frontend to make malaria-related image analysis accessible through a web interface.
+| # | Module | What it does |
+|---|---|---|
+| 1 | **Environmental and historical surveillance** | Weekly rainfall, temperature, humidity and case history per Lagos LGA; flags unusual conditions for the time of year |
+| 2 | **Malaria prediction engine** | Forecasts weekly cases 1–4 weeks ahead, compares against simple baselines, produces risk scores and early-warning alerts |
+| 3 | **AI command centre** | Commander, Surveillance, Supply, Outreach and Policy agents prepare a coordinated response; consequential actions wait for human approval |
+| 4 | **Medical supply and facility intelligence** | Tracks RDT kits and antimalarials, calculates shortages and proposes redistribution from facilities with spare stock |
+| 5 | **AI laboratory intelligence** | Classifies cells in uploaded blood-smear images (PlasmoSENet CNN); results count only after a qualified professional verifies them |
 
-**Live Demo:** https://nextora-zeta.vercel.app/
+> **Important:** Nextora is a decision-support research prototype. It is not a clinically validated diagnostic tool, not a validated parasite counter, and not an official surveillance system. Its outputs must not be used to diagnose, treat or rule out malaria.
 
-> **Important:** Nextora is an experimental research and educational prototype, not a clinically validated diagnostic tool. Its predictions must not be used as a substitute for professional medical assessment or laboratory confirmation.
+**Live demo (laboratory module only):** https://nextora-zeta.vercel.app/ — the full platform runs locally until it is redeployed (see [Deployment](#deployment)).
 
-## Features
+## How the modules connect: the Ikorodu scenario
 
-- **Single-cell classification:** Upload a blood cell image and receive a model prediction.
-- **Whole-smear analysis:** Experimentally identifies candidate regions in a larger blood-smear image and classifies image crops.
-- **Visual analysis:** Displays an annotated image showing candidate regions detected by the analysis pipeline.
-- **Prediction confidence:** Presents the model's confidence scores where available.
-- **Interactive web interface:** Upload images and inspect analysis results through a React-based frontend.
-- **REST API:** Uses FastAPI to expose prediction and smear-analysis endpoints.
-- **Deep learning:** Uses a custom PyTorch model, `PlasmoSENet`, for two-class image classification.
+1. **Surveillance** sees Ikorodu's weekly cases far above the usual level for this time of year, rising faster than the normal seasonal trend, while real rainfall is close to normal: weather does not explain the rise.
+2. **Prediction** forecasts that cases will stay above Ikorodu's alert threshold over the next weeks (risk score 90/100) and raises an early-warning alert.
+3. **Supply** finds three Ikorodu health centres short of rapid diagnostic test (RDT) kits — one stocked out — and calculates transfers from nearby facilities with spare stock.
+4. In the **command centre**, a coordinator presses *Run response*. The agents investigate, put the transfers and a public SMS draft into the approval queue, and write a situation report.
+5. A named person **approves** each transfer; the stock moves and the shortage alerts resolve. Verified **lab** results add evidence for the area.
 
-## How It Works
+A step-by-step demo for judges is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
-### 1. Single-cell classification
+## What is real and what is synthetic
 
-1. The user uploads a blood cell image.
-2. The image is resized to 224 × 224 pixels.
-3. The image is converted to a tensor and normalized using ImageNet mean and standard deviation values.
-4. The trained `PlasmoSENet` model generates a prediction.
-5. The application returns the predicted class and available confidence scores.
-
-### 2. Whole-smear analysis
-
-1. The user uploads a larger blood-smear image.
-2. The backend uses OpenCV to find candidate cell regions: adaptive threshold, morphological opening, contours, then a distance-transform watershed that splits touching or overlapping cells. Area and shape filters drop debris.
-3. Candidate regions are cropped from the original image.
-4. The existing classification model predicts a class for each crop.
-5. The backend returns the candidate-region results, counts, and an annotated image.
-
-### 3. Environmental and historical surveillance (Module 1)
-
-Weekly data for the 20 Lagos local government areas, 2016 to the latest full week:
+Every observation carries `data_origin` (REAL or SYNTHETIC) and a `source`, and the dashboard shows a badge wherever synthetic data appears.
 
 | Data | Origin | Source |
 |---|---|---|
-| Rainfall, mean/max temperature, relative humidity | **REAL** (reanalysis) | Open-Meteo Historical Weather API, ERA5/ERA5-Land reanalysis, at each LGA's approximate centre point. Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0). Reanalysis is modelled from observations; it is not a rain-gauge record. |
-| Weekly confirmed malaria cases | **SYNTHETIC** | Public weekly case data per LGA is not available, so cases are generated from the real weather (rainfall 3–8 weeks earlier, temperature), a slowly drifting transmission intensity, occasional multi-week outbreaks in the history (none in the final 26 weeks), and a scripted demo rise in Ikorodu over the latest 6 weeks. See `backend/app/core/surveillance/synthetic_cases.py`. |
-| Verified lab-positive smears | From Module 5 | Only results verified by a qualified reviewer. |
+| Lagos LGA names | REAL | The 20 local government areas; map points are approximate centres compiled by hand |
+| Weekly rainfall, temperature, humidity (2016 → Nov 2026) | **REAL** (reanalysis) | [Open-Meteo](https://open-meteo.com/) Historical Weather API, ERA5/ERA5-Land reanalysis (CC BY 4.0). Modelled from observations; not rain-gauge readings |
+| Weekly confirmed malaria cases | **SYNTHETIC** | Public weekly case data per LGA is not available. Generated from the real weather, a drifting transmission intensity, occasional historical outbreaks and a scripted rise in Ikorodu (`backend/app/core/surveillance/synthetic_cases.py`) |
+| Facilities, stock and consumption | **SYNTHETIC** | Fictional "Demo" facilities; consumption derived from each LGA's cases; three Ikorodu centres scripted short of RDT kits |
+| Lab submissions | As declared | Uploads are SYNTHETIC unless the submitter states they are real samples from that laboratory |
+| Blood-smear classifier | Trained on real public data | NIH Malaria Cell Images dataset (single, pre-cropped cells) |
 
-For each location, the surveillance view compares the latest weeks with the same time of year in earlier years: cases against the seasonal baseline, the 4-week case trend against the usual seasonal trend, 8-week rainfall against normal, temperature suitability (context only) and verified lab positives. A signal is raised only when the change is unusual for that series *and* large in relative and absolute terms. These levels describe current conditions; forecasts and risk scores come from the prediction engine (Module 2).
+Because case data is synthetic, the forecast accuracy figures below describe how well the pipeline recovers patterns built into the generator. **They are not evidence of real-world forecasting accuracy.**
 
-The weather file is committed in `data/real/`. To refresh it (about 3–4 minutes, no API key):
+## Quick start (local)
 
-```powershell
-python -m backend.scripts.fetch_weather
-```
-
-Then reset the demo data (`POST /api/demo/seed`). Without the file, the app falls back to synthetic weather and labels it SYNTHETIC.
-
-### 4. Malaria prediction engine (Module 2)
-
-Forecasts weekly confirmed cases 1–4 weeks ahead for every LGA and turns them into risk scores and early-warning alerts.
-
-- **Model:** one XGBoost regressor per horizon, pooled across LGAs, predicting log(cases + 1) from recent case levels, seasonal references, rainfall lags (0–9 weeks), temperature, humidity and week of year. Every feature for a forecast made in week *t* uses only data up to week *t*.
-- **Split (time-based, no shuffling):** train on target weeks up to 2023, validation on 2024 (early stopping, uncertainty, alert cut-off), test on 2025 to November 2026 (reported numbers). The serving model is then refit on all weeks.
-- **Alert threshold:** the classic malaria epidemic threshold, mean + 2 SD of weekly cases in the same weeks (±2) of earlier years.
-- **Risk score:** the highest estimated probability (×100) that cases reach the threshold in the next 1–4 weeks, from the model's out-of-sample validation errors. An early warning is raised when that probability passes a per-horizon cut-off chosen on the validation year.
-
-**Test-period results** (20 LGAs, 1,940 forecasts per horizon, 73 actual threshold crossings). MAE / RMSE in cases per week; lower is better:
-
-| Weeks ahead | Model | Persistence | Seasonal naive | Historical mean | Model precision / recall | Persistence precision / recall |
-|---|---|---|---|---|---|---|
-| 1 | **16.4 / 25.4** | 20.0 / 30.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.43 / 0.27 | 0.39 / 0.37 |
-| 2 | **17.1 / 26.5** | 20.7 / 29.8 | 29.9 / 44.8 | 24.3 / 36.3 | 0.30 / 0.26 | 0.37 / 0.37 |
-| 3 | **17.9 / 27.8** | 22.5 / 33.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.25 / 0.19 | 0.30 / 0.32 |
-| 4 | **18.6 / 29.4** | 24.5 / 36.1 | 29.9 / 44.8 | 24.3 / 36.3 | 0.24 / 0.22 | 0.22 / 0.26 |
-
-What this shows, honestly:
-
-- The model predicts case numbers more accurately than all three baselines at every horizon.
-- For the yes/no question "will cases cross the threshold?", the simple persistence baseline is as good as or better than the model at 1–3 weeks. Detection of crossings is modest for both.
-- **These are results on SYNTHETIC case data.** They show how well the pipeline recovers patterns built into the generator, not real-world forecasting accuracy.
-
-Retrain after changing the data (about 30 seconds):
+**Prerequisites:** Python 3.11+, Node.js 20+ and npm, Git.
 
 ```powershell
-python -m ml.train_forecast
-```
-
-This writes `ml/models/forecast/` (serving models), `ml/metrics/forecast_metrics.json` and `ml/metrics/forecast_backtest.csv`. Seeding demo data runs the forecasts and raises or resolves `RISK_FORECAST` alerts.
-
-### 5. Medical supply and facility intelligence (Module 4)
-
-Tracks malaria RDT kits, artemether-lumefantrine (ACT) courses and injectable artesunate at every facility. Stock and consumption in the demo are **SYNTHETIC**: consumption is derived from each LGA's cases, and three Ikorodu health centres are scripted short of RDT kits.
-
-All quantities are computed by deterministic code (`backend/app/core/supply/calculations.py`); agents only read and explain them:
-
-- **Expected weekly demand** = average consumption over the last 8 weeks × the location's forecast ratio (next 4 weeks of forecast cases ÷ last 8 weeks of cases), bounded 0.5–3.0. **Precaution:** where the malaria risk score is 50 or more, planned demand never drops below recent consumption.
-- **Status** by weeks of stock left: STOCKOUT (none), CRITICAL (< 1 week), LOW (< 2 weeks), OK, SURPLUS (> 10 weeks).
-- **Shortage quantity** restores 6 weeks of stock, rounded up to whole packs.
-- **Redistribution:** most urgent facility first (worst status, then higher area risk), nearest donor first, within 40 km. Donors keep at least 6 weeks of their own demand and give only whole packs. Anything not covered becomes an order to the central medical store.
-- **Alerts:** `SUPPLY_SHORTAGE` alerts are raised, updated and resolved by each scan. Severity is raised one level in areas with a risk score of 50 or more.
-- **Nothing moves without approval.** The transfer function re-checks the donor's stock at the moment of execution and refuses if the plan is out of date. It is only called after a human approves a proposal in the command centre.
-
-### 6. AI command centre (Module 3)
-
-Five agents coordinate the response for a selected location:
-
-| Agent | Tools (deterministic Python, scoped to the location) | Can propose |
-|---|---|---|
-| **Commander** | situation snapshot; `delegate_to_surveillance/supply/outreach/policy` | — |
-| **Surveillance** | surveillance signals, risk forecast, verified lab summary, open alerts | — |
-| **Supply** | shortages, redistribution plan | stock transfers and central orders (quantities come from the plan, never from the model) |
-| **Outreach** | outreach context with approved key messages | one public message draft (40–480 characters) |
-| **Policy** | situation snapshot, open alerts | — (writes the situation report) |
-
-- **Human approval:** agents can only create PENDING proposals. A named person approves or rejects each one. Approving a transfer executes it, re-checking the donor's stock first; if the plan has gone stale, the proposal ends FAILED and nothing moves. Approved orders and messages are recorded or queued only: no real order or SMS is sent in the demo.
-- **Live feed:** every thought, tool call, tool result, hand-off, final answer and error is written to `agent_messages` and streamed with Server-Sent Events.
-- **Modes:** `live` uses the configured AI provider (any provider; see `.env.example`). `offline` is the **OFFLINE DEMO MODE**: a scripted sequence that calls the same real tools, with every message labelled as scripted. It needs no API key or internet. `auto` (the default) picks live when a provider is configured, otherwise offline. A failed live run is recorded as FAILED; it does not silently switch to the script.
-- When a run completes, the location's open alerts are marked ACKNOWLEDGED.
-
-### 7. Command-centre dashboard
-
-Open `http://localhost:5173/?view=command` (also linked from the home page). One screen brings the five modules together:
-
-- **Headline numbers:** highest-risk LGA, early warnings, unresolved alerts, supply shortages, proposals awaiting approval, lab results awaiting review.
-- **Map (Leaflet + OpenStreetMap):** LGAs coloured by forecast risk and sized by next week's forecast cases; facilities shown red when short of stock. Click a circle to inspect it.
-- **Location panel (Plotly):** reported cases, the 1–4 week forecast with its 80% range and alert threshold, past 1-week forecasts from the backtest, surveillance signals, rainfall against cases, and facility stock.
-- **AI command centre:** choose a location and mode (Auto, Live AI or Offline demo) and press **Run response**. Agent steps stream in live, followed by the Policy Agent's situation report. Offline runs are clearly badged as scripted.
-- **Approval queue:** enter your name, then **Approve** or **Reject** each proposal. Approving a transfer moves the stock; outcomes (executed, failed, rejected) are listed.
-- **Alerts** from every module (acknowledge or resolve), **forecast accuracy vs baselines**, **data sources** (REAL or SYNTHETIC), and links to the lab review queue.
-- **Seed demo data** resets everything to the synthetic Lagos scenario (about 20 seconds).
-
-SYNTHETIC badges appear on every chart, signal, alert and table that uses synthetic data, and a banner states what is synthetic. The dashboard needs internet for map tiles; everything else is served by the local backend.
-
-### 8. Laboratory review workflow
-
-1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
-2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
-3. In the **Lab review queue** (`/?view=lab-review`), a qualified laboratory professional examines the slide and either verifies it with their own reading (positive or negative) or rejects it with a reason.
-4. Only verified submissions become surveillance observations for that location (`lab_smears_reviewed`, `lab_smears_positive`). A verified positive also raises an alert for the command centre. The reviewer's reading is recorded, not the model's.
-
-**Important limitation:** Candidate regions are not guaranteed to correspond to individual cells. The whole-smear pipeline is experimental, and classifying crops from full-smear images may produce different results from classifying isolated cell images.
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| Programming language | Python |
-| Deep learning | PyTorch |
-| Image processing | OpenCV |
-| Machine learning utilities | scikit-learn |
-| Backend API | FastAPI |
-| Database | SQLAlchemy: SQLite locally, PostgreSQL in deployment |
-| AI agents | Any provider: Anthropic Claude, OpenAI-compatible APIs, or Ollama |
-| Frontend | React, Vite; command centre uses Tailwind CSS, Leaflet (react-leaflet) and Plotly |
-| Frontend styling | CSS |
-| Frontend hosting | Vercel |
-| Backend hosting | Render |
-
-## Architecture
-
-```text
-                 User
-                  |
-                  v
-       React + Vite Frontend
-                  |
-                  | HTTP requests
-                  v
-           FastAPI Backend
-             /         \
-            v           v
-     Single-cell    Whole-smear
-     prediction      analysis
-            |           |
-            v           v
-        PlasmoSENet + OpenCV
-                  |
-                  v
-       Prediction and image results
-                  |
-                  v
-          Frontend display
-```
-
-## Model Information
-
-The application uses `PlasmoSENet`, a PyTorch image classification model configured for two classes.
-
-| Class ID | Class label |
-|---|---|
-| 0 | Parasitized (Infected) |
-| 1 | Uninfected |
-
-**Image preprocessing**
-
-- Resize: 224 × 224 pixels
-- Convert image to tensor
-- Normalize using ImageNet statistics
-
-Mean:
-
-```python
-[0.485, 0.456, 0.406]
-```
-
-Standard deviation:
-
-```python
-[0.229, 0.224, 0.225]
-```
-
-Model performance metrics are not included here because independently verified evaluation results have not been provided. The model card in `ml/lab_model_card.json` (served at `/api/lab/model-card` and shown on the review page) is where metrics from the training run go, together with a note on where they came from. Accuracy, precision, recall, F1-score, and confusion-matrix results should be added after evaluation on an appropriately separated test dataset.
-
-## Project Structure
-
-Nextora is growing from a blood-smear analyser into a five-module malaria early-warning and response platform (surveillance, prediction, AI command centre, supply intelligence and the existing laboratory module), sharing one backend and one database. See `PROJECT_SPEC.md`.
-
-```text
-Malaria_Detection/
-├── backend/
-│   ├── main.py                 # entry point: uvicorn backend.main:app
-│   ├── requirements.txt
-│   ├── requirements-dev.txt    # + pytest
-│   ├── app/
-│   │   ├── main.py             # FastAPI app, routers, startup
-│   │   ├── config.py           # settings from environment / .env
-│   │   ├── db.py               # SQLAlchemy engine (SQLite or PostgreSQL)
-│   │   ├── models.py           # shared tables: locations, facilities,
-│   │   │                       #   observations, alerts, proposals,
-│   │   │                       #   agent_runs, agent_messages
-│   │   ├── core/               # pure Python, no FastAPI imports
-│   │   │   ├── lab/            # PlasmoSENet, inference, smear analysis
-│   │   │   ├── llm/            # Anthropic / OpenAI-compatible / Ollama clients
-│   │   │   └── treatment_engine.py
-│   │   ├── agents/             # tool-calling loop and agent definitions
-│   │   └── modules/            # one FastAPI router per module
-│   └── tests/                  # pytest
-├── frontend/                   # React + Vite
-├── data/                       # SQLite database (git-ignored) and datasets
-├── model.pth                   # PlasmoSENet weights
-├── plasmosenet.py              # compatibility shim -> backend/app/core/lab/
-└── .env.example                # all configuration options
-```
-
-## Running Locally
-
-### Prerequisites
-
-- Python 3.11 recommended
-- Node.js and npm
-- Git
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/adebowaleokiki55/Nextora.git
-cd Nextora
-```
-
-### 2. Set up the Python backend
-
-Create and activate a virtual environment from the project root.
-
-**Windows PowerShell**
-
-```powershell
+# 1. Backend (from the project root)
 python -m venv backend/.venv
 .\backend\.venv\Scripts\Activate.ps1
-```
-
-Install the backend dependencies:
-
-```powershell
 pip install -r backend/requirements.txt
+copy .env.example .env            # optional: add an AI provider key (see Configuration)
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-Ensure `model.pth` and `plasmosenet.py` are available at the paths expected by the backend.
-
-### 3. Configure environment variables
-
-**Backend.** Copy `.env.example` to `.env` in the project root. Everything is optional:
-
-- **AI provider (any API key works).** The explanation agents run on Anthropic Claude, any OpenAI-compatible API (OpenAI, Groq, OpenRouter, Gemini, Together, Mistral, DeepSeek, LM Studio, vLLM...), or Ollama (local or Ollama Cloud). Set `LLM_PROVIDER`, `LLM_API_KEY` and `LLM_MODEL` (plus `LLM_BASE_URL` for OpenAI-compatible providers). If `LLM_PROVIDER` is not set, the first of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OLLAMA_API_KEY` found is used. Without any key, image analysis still works and the agent endpoints return a clear 503 message. `GET /api/health` shows which provider is active.
-- **Database.** SQLite at `data/nextora.db` by default; tables are created on startup. Set `DATABASE_URL` to a PostgreSQL URL in deployment (`postgres://` URLs from Render are accepted).
-
-**Frontend.** Configure the frontend API URL to point to your local FastAPI server.
-
-Create a `.env` file inside `frontend/`:
-
-```env
-VITE_API_URL=http://127.0.0.1:8000
-```
-
-For production, set `VITE_API_URL` to the deployed backend URL in your hosting provider's environment-variable settings.
-
-### 4. Start the backend
-
-From the project root, run:
+The first start creates `data/nextora.db` and seeds the demo scenario (about 20 seconds). API docs: http://127.0.0.1:8000/docs
 
 ```powershell
-python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-If your `main.py` uses imports or paths that require running from inside `backend/`, adjust the launch command accordingly.
-
-The local API should be available at:
-
-- API: http://127.0.0.1:8000
-- Interactive API documentation: http://127.0.0.1:8000/docs
-
-### 5. Start the frontend
-
-Open a second terminal:
-
-```powershell
+# 2. Frontend (second terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite in your terminal.
+Open http://localhost:5173 for the home page, or go straight to:
 
-### 6. Run the tests
+- **Command centre:** http://localhost:5173/?view=command
+- **Cell Explorer (lab analysis):** http://localhost:5173/?view=analyzer
+- **Lab review queue:** http://localhost:5173/?view=lab-review
+- **Treatment support (side page):** http://localhost:5173/?view=treatment
+
+The frontend uses `VITE_API_URL` (default `http://127.0.0.1:8000`); set it in `frontend/.env` if the backend runs elsewhere. Map tiles need internet; everything else is served by the local backend.
+
+**Tests** (temporary database, fake AI provider, no network needed; about 3 minutes):
 
 ```powershell
 pip install -r backend/requirements-dev.txt
 python -m pytest
 ```
 
-The tests use a temporary database and a fake AI provider, so they need no API key or network access.
+## Configuration
 
-## API Endpoints
+Copy `.env.example` to `.env` in the project root. Everything is optional.
 
-The FastAPI backend exposes the following endpoints.
+- **AI provider — any API key works.** The agents run on Anthropic Claude, any OpenAI-compatible API (OpenAI, Groq, OpenRouter, Gemini, Together, Mistral, DeepSeek, LM Studio, vLLM…), or Ollama (local or Ollama Cloud). Set `LLM_PROVIDER` (`anthropic`, `openai` or `ollama`), `LLM_API_KEY`, `LLM_MODEL`, and `LLM_BASE_URL` for OpenAI-compatible providers. If `LLM_PROVIDER` is unset, the first of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OLLAMA_API_KEY` found is used. `GET /api/health` shows the active provider. Without a provider, everything still works and the command centre uses its offline scripted mode.
+- **Database.** SQLite at `data/nextora.db` by default. Set `DATABASE_URL` to a PostgreSQL URL in deployment (`postgres://` URLs from Render are accepted).
+- **CORS.** `CORS_ORIGINS` (comma-separated) lists the frontend origins allowed to call the API.
+- **Lab model.** `LAB_MODEL_PATH` (default `model.pth`).
+
+## The modules in detail
+
+### Module 1 — Environmental and historical surveillance
+
+For each LGA, the latest weeks are compared with the same time of year in earlier years:
+
+- confirmed cases against the seasonal baseline;
+- the 4-week case trend against the usual seasonal trend (cases normally rise when the rains start);
+- 8-week rainfall against normal;
+- temperature suitability (context only: Lagos is almost always in the favourable band);
+- reviewer-verified lab positives.
+
+A signal is raised only when the change is unusual for that series (z-score) **and** large in relative and absolute terms, which keeps false alarms to about 1% of ordinary weeks per signal. These levels describe current conditions; forecasts and risk scores come from Module 2.
+
+Refresh the real weather (about 3–4 minutes, no API key; only LGA coordinates are sent), then reset the demo data:
+
+```powershell
+python -m backend.scripts.fetch_weather
+```
+
+Without `data/real/lagos_weather_weekly.csv`, the app falls back to synthetic weather and labels it SYNTHETIC.
+
+### Module 2 — Malaria prediction engine
+
+- **Model:** one XGBoost regressor per horizon (1–4 weeks), pooled across LGAs, predicting log(cases + 1) from recent case levels, seasonal references, rainfall lags (0–9 weeks), temperature, humidity and week of year. Every feature for a forecast made in week *t* uses only data up to week *t*.
+- **Time-based split, no shuffling:** train on target weeks up to 2023; validate on 2024 (early stopping, uncertainty, alert cut-off); test on January 2025 to November 2026. The serving model is then refit on all weeks.
+- **Alert threshold:** the classic malaria epidemic threshold, mean + 2 SD of weekly cases in the same weeks (±2) of earlier years.
+- **Risk score:** the highest estimated probability (×100) that cases reach the threshold in the next 4 weeks, from the model's out-of-sample validation errors. An early warning is raised when that probability passes a per-horizon cut-off chosen on the validation year.
+
+**Test-period results** (20 LGAs, 1,940 forecasts per horizon, 73 actual threshold crossings). MAE / RMSE in cases per week; lower is better:
+
+| Weeks ahead | Model | Persistence (last week) | Seasonal naive (same week last year) | Historical weekly mean | Model precision / recall | Persistence precision / recall |
+|---|---|---|---|---|---|---|
+| 1 | **16.4 / 25.4** | 20.0 / 30.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.43 / 0.27 | 0.39 / 0.37 |
+| 2 | **17.1 / 26.5** | 20.7 / 29.8 | 29.9 / 44.8 | 24.3 / 36.3 | 0.30 / 0.26 | 0.37 / 0.37 |
+| 3 | **17.9 / 27.8** | 22.5 / 33.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.25 / 0.19 | 0.30 / 0.32 |
+| 4 | **18.6 / 29.4** | 24.5 / 36.1 | 29.9 / 44.8 | 24.3 / 36.3 | 0.24 / 0.22 | 0.22 / 0.26 |
+
+- The model predicts case numbers more accurately than all three baselines at every horizon.
+- For the yes/no question "will cases cross the threshold?", persistence is as good as or better than the model at 1–3 weeks; detection of crossings is modest for both.
+- These results are on **SYNTHETIC** case data (see above).
+
+Retrain after changing the data (about 30 seconds); this writes `ml/models/forecast/`, `ml/metrics/forecast_metrics.json` and `ml/metrics/forecast_backtest.csv`:
+
+```powershell
+python -m ml.train_forecast
+```
+
+### Module 3 — AI command centre
+
+| Agent | Tools (deterministic Python, scoped to the selected location) | Can propose |
+|---|---|---|
+| **Commander** | situation snapshot; delegates to the four specialists | — |
+| **Surveillance** | surveillance signals, risk forecast, verified lab summary, open alerts | — |
+| **Supply** | shortages, redistribution plan | stock transfers and central orders (quantities from the plan, never from the model) |
+| **Outreach** | outreach context with approved key prevention messages | one public message draft (40–480 characters) |
+| **Policy** | situation snapshot, open alerts | — (writes the situation report) |
+
+- **Math lives in code.** Shortages, plans, risk scores and forecasts are computed by Python functions; agents call them as tools and explain the results.
+- **Human approval.** Agents only create PENDING proposals. A named person approves or rejects each one. Approving a transfer executes it after re-checking the donor's stock; if the plan has gone stale the proposal ends FAILED and nothing moves. Approved orders and messages are recorded or queued only — no real order or SMS is sent in the demo.
+- **Live feed.** Every thought, tool call, tool result, hand-off, final answer and error is written to `agent_messages` and streamed with Server-Sent Events.
+- **Modes.** `live` uses the configured AI provider. `offline` is the **OFFLINE DEMO MODE**: a scripted sequence calling the same real tools, every message labelled as scripted, no key or internet needed. `auto` picks live when a provider is configured, otherwise offline. A failed live run is recorded as FAILED rather than silently switching to the script.
+
+### Module 4 — Medical supply and facility intelligence
+
+Tracks malaria RDT kits, artemether-lumefantrine (ACT) courses and injectable artesunate. All quantities come from `backend/app/core/supply/calculations.py`:
+
+- **Expected weekly demand** = average consumption over the last 8 weeks × the location's forecast ratio, bounded 0.5–3.0. **Precaution:** where the risk score is 50 or more, planned demand never drops below recent consumption.
+- **Status** by weeks of stock left: STOCKOUT, CRITICAL (< 1 week), LOW (< 2), OK, SURPLUS (> 10).
+- **Shortage quantity** restores 6 weeks of stock, rounded up to whole packs.
+- **Redistribution:** most urgent facility first (worst status, then higher area risk), nearest donor first within 40 km; donors keep at least 6 weeks of their own demand and give whole packs only. Anything uncovered becomes a central order.
+- **Alerts:** `SUPPLY_SHORTAGE` alerts are raised, updated and resolved by each scan, one severity level higher in high-risk areas.
+
+### Module 5 — AI laboratory intelligence
+
+**Single-cell classification:** an uploaded cell image is resized to 224 × 224, normalised with ImageNet statistics and classified by PlasmoSENet (class 0 *Parasitized*, class 1 *Uninfected*).
+
+**Whole-smear analysis:** NIH training images are single pre-cropped cells, so a smear photo is first segmented with OpenCV — adaptive threshold, morphological opening, contours, then a distance-transform watershed that splits touching or overlapping cells, with area and shape filters to drop debris. Each crop is classified and the image is returned with green (uninfected) and red (possibly parasitized) boxes.
+
+**Review workflow:**
+
+1. After a whole-smear analysis, the lab worker chooses **Submit for review**, giving the laboratory, sample date and optionally a slide number. No patient names or identifiers are collected.
+2. The submission is stored as **PENDING_REVIEW**, labelled SYNTHETIC unless the submitter states it is a real sample from that laboratory.
+3. In the **Lab review queue**, a qualified professional examines the slide and verifies it with their own reading (positive or negative) or rejects it with a reason.
+4. Only verified submissions become surveillance observations for that location; a verified positive also raises an alert. The reviewer's reading is recorded, not the model's.
+
+**Model information:** `PlasmoSENet`, a custom PyTorch CNN (multi-scale stem, residual and inverted-residual blocks with squeeze-and-excitation), trained by the developer on the NIH Malaria Cell Images dataset. Held-out test metrics are not reported because the training run's train/test split was not recorded; the model card in `ml/lab_model_card.json` (served at `/api/lab/model-card`) is where metrics go, together with where they came from.
+
+### Command-centre dashboard
+
+One screen (`/?view=command`) brings the modules together: headline numbers; a Leaflet map of LGAs coloured by forecast risk with facilities flagged when short of stock; a location panel with the forecast chart (80% range, alert threshold, past forecasts), surveillance signals, rainfall against cases and facility stock; **Run response** with the live agent feed and situation report; the **approval queue**; alerts from every module; forecast accuracy against baselines; data sources; and a **Seed demo data** button that resets the synthetic Lagos scenario.
+
+## Architecture
+
+```text
+                React + Vite frontend
+   Home · Cell Explorer · Lab review · Command centre · Treatment
+                          |
+                     HTTP + SSE
+                          |
+                   FastAPI backend
+  ┌─────────────┬─────────────┬─────────────┬─────────────┬─────────────┐
+  │ Surveillance│ Prediction  │ Command     │ Supply      │ Lab         │
+  │ (Module 1)  │ (Module 2)  │ centre (3)  │ (Module 4)  │ (Module 5)  │
+  │ signals     │ XGBoost     │ 5 agents,   │ demand,     │ PlasmoSENet │
+  │ weather     │ baselines   │ approvals,  │ shortages,  │ + OpenCV    │
+  │             │ risk scores │ live feed   │ transfers   │ review      │
+  └──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┘
+         └─────────────┴──── shared database ──────┴─────────────┘
+   locations · facilities · observations · alerts · proposals · forecasts
+   stock · lab submissions · agent runs and messages   (SQLite / PostgreSQL)
+                          |
+             Any AI provider (agents only)
+```
+
+## Project structure
+
+```text
+Malaria_Detection/
+├── backend/
+│   ├── main.py                 # entry point: uvicorn backend.main:app
+│   ├── requirements.txt / requirements-dev.txt
+│   ├── app/
+│   │   ├── main.py             # FastAPI app, routers, startup seeding
+│   │   ├── config.py           # settings from environment / .env
+│   │   ├── db.py, models.py    # shared database and tables
+│   │   ├── core/               # pure Python logic, unit-tested
+│   │   │   ├── surveillance/   # weather, synthetic cases, signals
+│   │   │   ├── prediction/     # features, training, forecasts, risk
+│   │   │   ├── supply/         # stock calculations, plans, transfers
+│   │   │   ├── command/        # agent tool data, approval queue
+│   │   │   ├── lab/            # PlasmoSENet, inference, segmentation, review
+│   │   │   ├── llm/            # Anthropic / OpenAI-compatible / Ollama clients
+│   │   │   ├── demo_seed.py    # the synthetic Lagos scenario
+│   │   │   └── treatment_engine.py
+│   │   ├── agents/             # tool loop, command centre, offline script
+│   │   └── modules/            # one FastAPI router per module
+│   ├── scripts/fetch_weather.py
+│   └── tests/                  # pytest (136 tests)
+├── ml/                         # forecast training, models, metrics, lab model card
+├── frontend/src/               # React app; dashboard/ is the command centre
+├── data/real/                  # real weather (committed); local DB (git-ignored)
+├── docs/DEMO_SCRIPT.md         # step-by-step demo for judges
+├── model.pth                   # PlasmoSENet weights
+└── .env.example                # all configuration options
+```
+
+## API endpoints
+
+Open `/docs` on the running backend for request and response schemas.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/health` | Backend, model, database and AI-provider status |
-| GET | `/api/diagnostics/memory` | Process memory and inference-slot status |
-| POST | `/api/predict` | Classify a single-cell image |
-| POST | `/api/analyze-smear` | Perform experimental whole-smear candidate-region analysis |
-| POST | `/api/agent/explain` | AI explanation of a single-cell or whole-smear result |
-| POST | `/api/lab/submissions` | Analyse a smear and store it as **PENDING_REVIEW** (facility, sample date, submitter, optional slide number; `data_origin` defaults to SYNTHETIC) |
-| GET | `/api/lab/submissions` | List submissions; filter by `status`, `location_id`, `facility_id` |
-| GET | `/api/lab/submissions/{id}` | One submission with its cell-level results |
-| GET | `/api/lab/submissions/{id}/annotated.png` | Annotated smear image |
-| POST | `/api/lab/submissions/{id}/review` | Qualified review: `VERIFIED` (with the reviewer's own POSITIVE/NEGATIVE reading) or `REJECTED` (with a reason) |
-| GET | `/api/lab/model-card` | Model description, training data, limitations and metrics status |
-| GET | `/api/locations`, `/api/facilities` | Monitored Lagos LGAs and participating facilities |
+| GET | `/api/locations`, `/api/facilities` | Monitored LGAs and participating facilities |
 | GET | `/api/surveillance/overview` | Current surveillance level and key signals for every LGA |
-| GET | `/api/surveillance/locations/{id}` | Signals plus weekly series (cases, rainfall, temperature, humidity, verified lab results); `?weeks=156` |
+| GET | `/api/surveillance/locations/{id}` | Signals and weekly series for one LGA (`?weeks=156`) |
 | GET | `/api/surveillance/sources` | Every dataset held: real or synthetic, source, coverage |
-| GET | `/api/prediction/risk` | Risk score, level, early-warning flag and 1–4 week forecasts for every LGA |
-| GET | `/api/prediction/locations/{id}` | Recent cases, latest forecasts and test-period backtest for one LGA |
+| GET | `/api/prediction/risk` | Risk score, level, early warning and 1–4 week forecasts for every LGA |
+| GET | `/api/prediction/locations/{id}` | Recent cases, latest forecasts and test-period backtest |
 | GET | `/api/prediction/evaluation` | Model vs baselines: MAE, RMSE, precision and recall per horizon |
 | POST | `/api/prediction/run` | Recompute forecasts and update early-warning alerts |
-| GET | `/api/supply/items`, `/api/supply/policy` | Tracked commodities and the stock rules in plain language |
-| GET | `/api/supply/status` | Stock assessment per facility and item; filter by `item_code`, `location_id`, `status` |
-| GET | `/api/supply/shortages` | Facilities at risk of running out, most urgent first |
+| GET | `/api/supply/items`, `/api/supply/policy` | Tracked commodities and the stock rules |
+| GET | `/api/supply/status`, `/api/supply/shortages` | Stock assessments; shortages, most urgent first |
 | GET | `/api/supply/redistribution` | Recommended transfers and central orders (recommendation only) |
 | POST | `/api/supply/scan` | Re-assess stock and update shortage alerts |
 | GET | `/api/supply/facilities/{id}` | One facility's stock and 12-week ledger |
-| POST | `/api/command/runs` | Start the agents for a location: `{"location_id": 12, "mode": "auto" \| "live" \| "offline"}` |
-| GET | `/api/command/runs/{id}/events` | Live feed (Server-Sent Events): one `message` event per agent step, then `done` |
-| GET | `/api/command/runs`, `/api/command/runs/{id}` | Runs, with messages, summary and situation report |
+| POST | `/api/command/runs` | Start the agents: `{"location_id": 12, "mode": "auto" \| "live" \| "offline"}` |
+| GET | `/api/command/runs/{id}/events` | Live feed (Server-Sent Events) |
+| GET | `/api/command/runs`, `/api/command/runs/{id}` | Runs with messages, summary and situation report |
 | GET | `/api/proposals` | Approval queue; filter by `status`, `location_id`, `run_id` |
 | POST | `/api/proposals/{id}/approve`, `/reject` | Human decision `{"decided_by": "...", "note": "..."}`; approve executes |
 | GET | `/api/alerts` | Unresolved alerts from all modules, most severe first |
 | POST | `/api/alerts/{id}/acknowledge`, `/resolve` | Update an alert |
+| POST | `/api/predict` | Classify a single-cell image |
+| POST | `/api/analyze-smear` | Whole-smear analysis (nothing stored) |
+| POST | `/api/agent/explain` | AI explanation of a lab result |
+| POST | `/api/lab/submissions` | Analyse a smear and store it as PENDING_REVIEW |
+| GET | `/api/lab/submissions`, `/api/lab/submissions/{id}` | Submissions and cell-level results |
+| GET | `/api/lab/submissions/{id}/annotated.png` | Annotated smear image |
+| POST | `/api/lab/submissions/{id}/review` | Qualified review: VERIFIED (with reading) or REJECTED (with reason) |
+| GET | `/api/lab/model-card` | Lab model description, training data, limitations, metrics status |
 | POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
-| POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
-| POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |
-
-Open `/docs` on the running backend to inspect the request schemas, required image-upload fields, and response formats.
+| POST | `/api/treatment/recommend`, `/api/agent/treatment-report` | Treatment decision support (side page) |
+| GET | `/api/diagnostics/memory` | Process memory and inference-slot status |
 
 ## Deployment
 
-The current application is deployed using:
+The laboratory module is currently deployed (frontend on Vercel, backend on Render). To deploy the full platform:
 
-- **Frontend:** Vercel — https://nextora-zeta.vercel.app/
-- **Backend:** Render — https://nextora-npmm.onrender.com
+**Backend (Render web service)**
 
-The frontend sends API requests to the backend. The production API URL and CORS configuration must match the deployed frontend domain.
+- Build: `pip install -r backend/requirements.txt` · Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` · Python 3.11.
+- Use a **PostgreSQL** database and set `DATABASE_URL`. Render's free disk is wiped on every redeploy, so SQLite would lose approvals and lab reviews. The PostgreSQL path is configured but has only been tested on SQLite so far.
+- Set `CORS_ORIGINS` to your Vercel domain(s) and, for live agents, the `LLM_*` variables.
+- **Memory:** measured locally (Windows), the backend uses about 380 MB after imports and 530–580 MB once seeded and in use (PyTorch, XGBoost and pandas). That is at or above the 512 MB of Render's free and Starter instances; plan for a larger instance or trim dependencies.
+- **First start** seeds the database (about 20 seconds plus model loading); allow for this in the health-check timeout.
 
-## Validation and Limitations
+**Frontend (Vercel):** set `VITE_API_URL` to the backend URL.
 
-Nextora is a prototype, and several limitations must be considered:
+## Limitations
 
-- A predicted class is not a confirmed medical diagnosis.
-- Model confidence is not equivalent to clinical certainty.
-- Whole-smear candidate detection uses image-processing heuristics and may miss cells or identify non-cell regions.
-- A classifier trained on isolated cell images may not generalize reliably to crops extracted from whole-smear images.
-- Clinical use would require rigorous validation, independent testing, expert-annotated data, and assessment across different imaging conditions and patient populations.
+- **Synthetic data.** Case counts, facilities and stock are synthetic, so forecast metrics and the scenario do not demonstrate real-world performance.
+- **Not a diagnostic tool.** A predicted class is not a diagnosis, model confidence is not a calibrated clinical probability, and candidate counts are not a validated parasitemia measurement.
+- **Smear segmentation is heuristic.** It may miss cells or include non-cell regions; it was tuned on drawn test images, not on real smear photos. A classifier trained on isolated cells may not generalise to crops from whole-smear photos.
+- **Lab model metrics unavailable.** The training split was not recorded, so no held-out accuracy, sensitivity, specificity or AUC is reported.
+- **Agent outputs** depend on the AI provider and can contain mistakes; every consequential action needs human approval, and the situation report should be read as a draft.
+- **No authentication.** Anyone who can reach the app can approve or reject proposals. Real use would need accounts, roles and audit review.
+- Clinical or operational use would require rigorous validation, independent testing, expert-annotated data, real surveillance data and assessment across different settings.
 
-Future evaluation should include patient-independent train/test splits to reduce data leakage, per-class precision and recall, F1-score, a confusion matrix, and external validation where appropriate.
+## Future improvements
 
-## Future Improvements
-
-- Evaluate generalization on unseen patient samples.
-- Improve candidate-cell detection and localization.
-- Compare predictions against expert-annotated microscopy images.
-- Add model evaluation reports and error analysis.
-- Improve inference performance and image-upload validation.
-- Investigate whether the whole-smear pipeline can support reliable, validated quantitative measurements.
+- Replace synthetic cases with real surveillance data (for example DHIS2 extracts) and re-evaluate the forecasts.
+- Add satellite vegetation (NDVI) and other environmental layers to Module 1.
+- Evaluate the lab model on patient-independent splits and real, expert-annotated smear photos; report sensitivity, specificity and AUC.
+- Improve cell detection and localisation on real microscopy images.
+- Add authentication and role-based approval, and database migrations.
 
 ## Disclaimer
-Nextora is intended for research, learning, and demonstration purposes only. It has not been established as a clinically validated diagnostic system. Do not use its output to diagnose, treat, or rule out malaria. Medical decisions must be made with qualified healthcare professionals and appropriate laboratory testing.
 
+Nextora is intended for research, learning and demonstration purposes only. It has not been established as a clinically validated diagnostic system. Do not use its output to diagnose, treat or rule out malaria. Medical decisions must be made with qualified healthcare professionals and appropriate laboratory testing.
 
-**Okiki** — Data Science student interested in machine learning, artificial intelligence, and practical applications of AI.
+**Okiki** — Data Science student interested in machine learning, artificial intelligence and practical applications of AI.
 
 GitHub: https://github.com/adebowaleokiki55
-
