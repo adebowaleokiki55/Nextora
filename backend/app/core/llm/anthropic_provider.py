@@ -120,11 +120,12 @@ class AnthropicClient:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         anthropic = self._anthropic
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "max_tokens": MAX_TOKENS,
+            "max_tokens": max(max_tokens or MAX_TOKENS, MAX_TOKENS),
             "system": system,
             "messages": to_anthropic_messages(messages),
         }

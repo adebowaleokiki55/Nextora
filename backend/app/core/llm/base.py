@@ -70,6 +70,7 @@ class LLMClient(Protocol):
         system: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse: ...
 
 

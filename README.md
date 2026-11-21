@@ -101,7 +101,24 @@ All quantities are computed by deterministic code (`backend/app/core/supply/calc
 - **Alerts:** `SUPPLY_SHORTAGE` alerts are raised, updated and resolved by each scan. Severity is raised one level in areas with a risk score of 50 or more.
 - **Nothing moves without approval.** The transfer function re-checks the donor's stock at the moment of execution and refuses if the plan is out of date. It is only called after a human approves a proposal in the command centre.
 
-### 6. Laboratory review workflow
+### 6. AI command centre (Module 3)
+
+Five agents coordinate the response for a selected location:
+
+| Agent | Tools (deterministic Python, scoped to the location) | Can propose |
+|---|---|---|
+| **Commander** | situation snapshot; `delegate_to_surveillance/supply/outreach/policy` | — |
+| **Surveillance** | surveillance signals, risk forecast, verified lab summary, open alerts | — |
+| **Supply** | shortages, redistribution plan | stock transfers and central orders (quantities come from the plan, never from the model) |
+| **Outreach** | outreach context with approved key messages | one public message draft (40–480 characters) |
+| **Policy** | situation snapshot, open alerts | — (writes the situation report) |
+
+- **Human approval:** agents can only create PENDING proposals. A named person approves or rejects each one. Approving a transfer executes it, re-checking the donor's stock first; if the plan has gone stale, the proposal ends FAILED and nothing moves. Approved orders and messages are recorded or queued only: no real order or SMS is sent in the demo.
+- **Live feed:** every thought, tool call, tool result, hand-off, final answer and error is written to `agent_messages` and streamed with Server-Sent Events.
+- **Modes:** `live` uses the configured AI provider (any provider; see `.env.example`). `offline` is the **OFFLINE DEMO MODE**: a scripted sequence that calls the same real tools, with every message labelled as scripted. It needs no API key or internet. `auto` (the default) picks live when a provider is configured, otherwise offline. A failed live run is recorded as FAILED; it does not silently switch to the script.
+- When a run completes, the location's open alerts are marked ACKNOWLEDGED.
+
+### 7. Laboratory review workflow
 
 1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
 2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
@@ -330,6 +347,13 @@ The FastAPI backend exposes the following endpoints.
 | GET | `/api/supply/redistribution` | Recommended transfers and central orders (recommendation only) |
 | POST | `/api/supply/scan` | Re-assess stock and update shortage alerts |
 | GET | `/api/supply/facilities/{id}` | One facility's stock and 12-week ledger |
+| POST | `/api/command/runs` | Start the agents for a location: `{"location_id": 12, "mode": "auto" \| "live" \| "offline"}` |
+| GET | `/api/command/runs/{id}/events` | Live feed (Server-Sent Events): one `message` event per agent step, then `done` |
+| GET | `/api/command/runs`, `/api/command/runs/{id}` | Runs, with messages, summary and situation report |
+| GET | `/api/proposals` | Approval queue; filter by `status`, `location_id`, `run_id` |
+| POST | `/api/proposals/{id}/approve`, `/reject` | Human decision `{"decided_by": "...", "note": "..."}`; approve executes |
+| GET | `/api/alerts` | Unresolved alerts from all modules, most severe first |
+| POST | `/api/alerts/{id}/acknowledge`, `/resolve` | Update an alert |
 | POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
 | POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
 | POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |

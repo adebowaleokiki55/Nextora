@@ -19,3 +19,5 @@ Thumbs.db
 # Local database and generated data
 data/*.db
 data/*.db-journal
+data/*.db-wal
+data/*.db-shm

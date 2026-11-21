@@ -13,6 +13,8 @@ import requests
 
 from backend.app.core.llm.base import LLMError, LLMResponse, ToolCall, ToolSpec, native_raw
 
+DEFAULT_NUM_PREDICT = 500
+
 
 def to_ollama_messages(system: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = [{"role": "system", "content": system}]
@@ -95,13 +97,14 @@ class OllamaClient:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec] | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         payload = {
             "model": self.model,
             "messages": to_ollama_messages(system, messages),
             "tools": to_ollama_tools(tools or []),
             "stream": False,
-            "options": {"temperature": 0, "num_predict": 500},
+            "options": {"temperature": 0, "num_predict": max_tokens or DEFAULT_NUM_PREDICT},
         }
         headers = {"Content-Type": "application/json"}
         if self.api_key:

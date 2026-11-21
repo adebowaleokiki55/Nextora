@@ -25,14 +25,18 @@ def make_engine(url: str) -> Engine:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
         engine = create_engine(
             url,
-            connect_args={"check_same_thread": False},
+            # Agent runs write from a background thread while the live feed
+            # reads: wait for locks instead of failing immediately.
+            connect_args={"check_same_thread": False, "timeout": 30},
             poolclass=StaticPool if in_memory else None,
         )
 
         @event.listens_for(engine, "connect")
-        def _enable_sqlite_foreign_keys(dbapi_connection, _record):
+        def _configure_sqlite(dbapi_connection, _record):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            if not in_memory:
+                cursor.execute("PRAGMA journal_mode=WAL")  # readers do not block the writer
             cursor.close()
 
         return engine

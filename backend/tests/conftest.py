@@ -24,7 +24,7 @@ class FakeLLM:
         self.script = list(script)
         self.calls = []
 
-    def chat(self, system, messages, tools=None):
+    def chat(self, system, messages, tools=None, max_tokens=None):
         self.calls.append({"system": system, "messages": list(messages), "tools": tools})
         if not self.script:
             raise AssertionError("FakeLLM ran out of scripted responses")

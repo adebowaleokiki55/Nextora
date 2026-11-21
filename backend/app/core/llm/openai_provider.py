@@ -136,6 +136,7 @@ class OpenAICompatibleClient:
         system: str,
         messages: list[dict[str, Any]],
         tools: list[ToolSpec] | None = None,
+        max_tokens: int | None = None,  # not sent: parameter names differ by provider
     ) -> LLMResponse:
         openai = self._openai
         kwargs: dict[str, Any] = {

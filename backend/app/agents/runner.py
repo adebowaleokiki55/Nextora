@@ -41,10 +41,12 @@ def run_tool_loop(
     reminder: Callable[[set[str]], str] | None = None,
     exhausted_detail: str = "The agent could not finish within the allowed rounds.",
     on_event: EventHook | None = None,
+    max_tokens: int | None = None,
 ) -> AgentResult:
     """Run the model until it answers, enforcing required and approved tools.
 
-    Each tool runs at most once per loop; repeat calls get the cached result.
+    A repeated call with identical arguments gets the cached result; a call
+    with different arguments (e.g. a corrected draft) runs again.
     """
     approved = {tool.spec.name: tool for tool in tools}
     required = set(required_tools or set())
@@ -53,10 +55,11 @@ def run_tool_loop(
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
     result = AgentResult(answer="")
+    cache: dict[tuple[str, str], Any] = {}
 
     for round_number in range(1, max_rounds + 1):
         result.rounds = round_number
-        response = client.chat(system, messages, specs)
+        response = client.chat(system, messages, specs, max_tokens=max_tokens) if max_tokens else client.chat(system, messages, specs)
 
         if not response.tool_calls:
             if not response.text:
@@ -95,11 +98,13 @@ def run_tool_loop(
 
             emit("tool_call", {"tool": call.name, "arguments": call.arguments})
 
-            if call.name not in result.tool_results:
-                result.tool_results[call.name] = tool.handler(call.arguments)
-                result.tools_executed.append(call.name)
-
-            output = result.tool_results[call.name]
+            key = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+            if key not in cache:
+                cache[key] = tool.handler(call.arguments)
+                if call.name not in result.tools_executed:
+                    result.tools_executed.append(call.name)
+            output = cache[key]
+            result.tool_results[call.name] = output
             emit("tool_result", {"tool": call.name, "result": output})
 
             messages.append(
