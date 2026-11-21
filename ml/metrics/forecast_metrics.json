@@ -1,0 +1,311 @@
+{
+ "model_version": "xgb-0b8091e3b7",
+ "case_data_origin": "SYNTHETIC",
+ "honesty_note": "Evaluated on SYNTHETIC case data generated from real weather. These numbers show how well the pipeline recovers patterns built into the synthetic generator; they are NOT evidence of real-world forecasting accuracy.",
+ "created_at": "2026-11-21T20:42:09+00:00",
+ "algorithm": "XGBoost regressor on log1p(weekly cases), one model per horizon, pooled across locations",
+ "horizons": {
+  "h1": {
+   "horizon_weeks": 1,
+   "train_rows": 8160,
+   "validation_rows": 1040,
+   "test_rows": 1940,
+   "best_iteration": 477,
+   "alert_cutoff": 0.3,
+   "validation_crossings": 28,
+   "model": {
+    "mae": 16.37,
+    "rmse": 25.41,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.426,
+     "recall": 0.274,
+     "f1": 0.333,
+     "true_positives": 20,
+     "false_positives": 27,
+     "false_negatives": 53,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_persistence": {
+    "label": "Persistence (last observed week)",
+    "mae": 20.01,
+    "rmse": 29.98,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.386,
+     "recall": 0.37,
+     "f1": 0.378,
+     "true_positives": 27,
+     "false_positives": 43,
+     "false_negatives": 46,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_seasonal_naive": {
+    "label": "Seasonal naive (same week last year)",
+    "mae": 29.85,
+    "rmse": 44.79,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.032,
+     "recall": 0.014,
+     "f1": 0.019,
+     "true_positives": 1,
+     "false_positives": 30,
+     "false_negatives": 72,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_hist_mean": {
+    "label": "Historical weekly mean (same week, earlier years)",
+    "mae": 24.26,
+    "rmse": 36.3,
+    "n": 1940,
+    "crossing": {
+     "precision": null,
+     "recall": 0.0,
+     "f1": null,
+     "true_positives": 0,
+     "false_positives": 0,
+     "false_negatives": 73,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   }
+  },
+  "h2": {
+   "horizon_weeks": 2,
+   "train_rows": 8140,
+   "validation_rows": 1040,
+   "test_rows": 1940,
+   "best_iteration": 464,
+   "alert_cutoff": 0.25,
+   "validation_crossings": 28,
+   "model": {
+    "mae": 17.11,
+    "rmse": 26.51,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.297,
+     "recall": 0.26,
+     "f1": 0.277,
+     "true_positives": 19,
+     "false_positives": 45,
+     "false_negatives": 54,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_persistence": {
+    "label": "Persistence (last observed week)",
+    "mae": 20.72,
+    "rmse": 29.82,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.365,
+     "recall": 0.37,
+     "f1": 0.367,
+     "true_positives": 27,
+     "false_positives": 47,
+     "false_negatives": 46,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_seasonal_naive": {
+    "label": "Seasonal naive (same week last year)",
+    "mae": 29.85,
+    "rmse": 44.79,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.032,
+     "recall": 0.014,
+     "f1": 0.019,
+     "true_positives": 1,
+     "false_positives": 30,
+     "false_negatives": 72,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_hist_mean": {
+    "label": "Historical weekly mean (same week, earlier years)",
+    "mae": 24.26,
+    "rmse": 36.3,
+    "n": 1940,
+    "crossing": {
+     "precision": null,
+     "recall": 0.0,
+     "f1": null,
+     "true_positives": 0,
+     "false_positives": 0,
+     "false_negatives": 73,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   }
+  },
+  "h3": {
+   "horizon_weeks": 3,
+   "train_rows": 8120,
+   "validation_rows": 1040,
+   "test_rows": 1940,
+   "best_iteration": 375,
+   "alert_cutoff": 0.25,
+   "validation_crossings": 28,
+   "model": {
+    "mae": 17.88,
+    "rmse": 27.77,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.25,
+     "recall": 0.192,
+     "f1": 0.217,
+     "true_positives": 14,
+     "false_positives": 42,
+     "false_negatives": 59,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_persistence": {
+    "label": "Persistence (last observed week)",
+    "mae": 22.52,
+    "rmse": 32.97,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.299,
+     "recall": 0.315,
+     "f1": 0.307,
+     "true_positives": 23,
+     "false_positives": 54,
+     "false_negatives": 50,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_seasonal_naive": {
+    "label": "Seasonal naive (same week last year)",
+    "mae": 29.85,
+    "rmse": 44.79,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.032,
+     "recall": 0.014,
+     "f1": 0.019,
+     "true_positives": 1,
+     "false_positives": 30,
+     "false_negatives": 72,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_hist_mean": {
+    "label": "Historical weekly mean (same week, earlier years)",
+    "mae": 24.26,
+    "rmse": 36.3,
+    "n": 1940,
+    "crossing": {
+     "precision": null,
+     "recall": 0.0,
+     "f1": null,
+     "true_positives": 0,
+     "false_positives": 0,
+     "false_negatives": 73,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   }
+  },
+  "h4": {
+   "horizon_weeks": 4,
+   "train_rows": 8100,
+   "validation_rows": 1040,
+   "test_rows": 1940,
+   "best_iteration": 193,
+   "alert_cutoff": 0.2,
+   "validation_crossings": 28,
+   "model": {
+    "mae": 18.64,
+    "rmse": 29.44,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.239,
+     "recall": 0.219,
+     "f1": 0.229,
+     "true_positives": 16,
+     "false_positives": 51,
+     "false_negatives": 57,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_persistence": {
+    "label": "Persistence (last observed week)",
+    "mae": 24.53,
+    "rmse": 36.08,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.218,
+     "recall": 0.26,
+     "f1": 0.238,
+     "true_positives": 19,
+     "false_positives": 68,
+     "false_negatives": 54,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_seasonal_naive": {
+    "label": "Seasonal naive (same week last year)",
+    "mae": 29.85,
+    "rmse": 44.79,
+    "n": 1940,
+    "crossing": {
+     "precision": 0.032,
+     "recall": 0.014,
+     "f1": 0.019,
+     "true_positives": 1,
+     "false_positives": 30,
+     "false_negatives": 72,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   },
+   "baseline_hist_mean": {
+    "label": "Historical weekly mean (same week, earlier years)",
+    "mae": 24.26,
+    "rmse": 36.3,
+    "n": 1940,
+    "crossing": {
+     "precision": null,
+     "recall": 0.0,
+     "f1": null,
+     "true_positives": 0,
+     "false_positives": 0,
+     "false_negatives": 73,
+     "actual_crossings": 73,
+     "weeks_evaluated": 1940
+    }
+   }
+  }
+ },
+ "split": {
+  "train_target_weeks": "up to 2023-12-31",
+  "validation_target_weeks": "2023-12-31 to 2024-12-29 (exclusive start)",
+  "test_target_weeks": "after 2024-12-29",
+  "method": "time-based, no shuffling"
+ },
+ "data_through_week": "2026-11-02",
+ "alert_rule": {
+  "threshold": "mean + 2 SD of weekly cases in the same week (+/- 2 weeks) of earlier years",
+  "crossing_forecast": "P(cases >= threshold) >= a per-horizon cut-off chosen to maximise F1 on the validation period (never on the test period)",
+  "probability_method": "empirical distribution of validation-period errors (log scale)",
+  "interval": "10th-90th percentile of validation errors"
+ },
+ "version": "xgb-0b8091e3b7"
+}

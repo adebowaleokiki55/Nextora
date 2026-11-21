@@ -247,6 +247,36 @@ class LabCell(Base):
 
 
 # --------------------------------------------------------------------------
+# Module 2: forecasts
+# --------------------------------------------------------------------------
+
+class Forecast(Base):
+    """One location's forecast for one target week, made at one origin week."""
+
+    __tablename__ = "forecasts"
+    __table_args__ = (
+        Index("ix_forecasts_location_origin", "location_id", "origin_week"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    model_version: Mapped[str] = mapped_column(String(40))
+    location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"))
+    origin_week: Mapped[date] = mapped_column(Date)  # last week of data used
+    target_week: Mapped[date] = mapped_column(Date)
+    horizon: Mapped[int] = mapped_column(Integer)  # weeks ahead, 1-4
+    predicted_cases: Mapped[float] = mapped_column(Float)
+    lower_cases: Mapped[float] = mapped_column(Float)  # 10th percentile
+    upper_cases: Mapped[float] = mapped_column(Float)  # 90th percentile
+    alert_threshold: Mapped[float | None] = mapped_column(Float)
+    exceedance_probability: Mapped[float | None] = mapped_column(Float)
+    alert_cutoff: Mapped[float] = mapped_column(Float)
+    drivers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # SYNTHETIC whenever the case history it was computed from is synthetic.
+    data_origin: Mapped[DataOrigin] = mapped_column(_enum(DataOrigin))
+
+
+# --------------------------------------------------------------------------
 # Common alert system
 # --------------------------------------------------------------------------
 

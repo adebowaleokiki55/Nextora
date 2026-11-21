@@ -43,7 +43,7 @@ Weekly data for the 20 Lagos local government areas, 2016 to the latest full wee
 | Data | Origin | Source |
 |---|---|---|
 | Rainfall, mean/max temperature, relative humidity | **REAL** (reanalysis) | Open-Meteo Historical Weather API, ERA5/ERA5-Land reanalysis, at each LGA's approximate centre point. Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0). Reanalysis is modelled from observations; it is not a rain-gauge record. |
-| Weekly confirmed malaria cases | **SYNTHETIC** | Public weekly case data per LGA is not available, so cases are generated from the real weather (rainfall 3–8 weeks earlier, temperature) with a scripted demo rise in Ikorodu over the latest 6 weeks. |
+| Weekly confirmed malaria cases | **SYNTHETIC** | Public weekly case data per LGA is not available, so cases are generated from the real weather (rainfall 3–8 weeks earlier, temperature), a slowly drifting transmission intensity, occasional multi-week outbreaks in the history (none in the final 26 weeks), and a scripted demo rise in Ikorodu over the latest 6 weeks. See `backend/app/core/surveillance/synthetic_cases.py`. |
 | Verified lab-positive smears | From Module 5 | Only results verified by a qualified reviewer. |
 
 For each location, the surveillance view compares the latest weeks with the same time of year in earlier years: cases against the seasonal baseline, the 4-week case trend against the usual seasonal trend, 8-week rainfall against normal, temperature suitability (context only) and verified lab positives. A signal is raised only when the change is unusual for that series *and* large in relative and absolute terms. These levels describe current conditions; forecasts and risk scores come from the prediction engine (Module 2).
@@ -56,7 +56,39 @@ python -m backend.scripts.fetch_weather
 
 Then reset the demo data (`POST /api/demo/seed`). Without the file, the app falls back to synthetic weather and labels it SYNTHETIC.
 
-### 4. Laboratory review workflow
+### 4. Malaria prediction engine (Module 2)
+
+Forecasts weekly confirmed cases 1–4 weeks ahead for every LGA and turns them into risk scores and early-warning alerts.
+
+- **Model:** one XGBoost regressor per horizon, pooled across LGAs, predicting log(cases + 1) from recent case levels, seasonal references, rainfall lags (0–9 weeks), temperature, humidity and week of year. Every feature for a forecast made in week *t* uses only data up to week *t*.
+- **Split (time-based, no shuffling):** train on target weeks up to 2023, validation on 2024 (early stopping, uncertainty, alert cut-off), test on 2025 to November 2026 (reported numbers). The serving model is then refit on all weeks.
+- **Alert threshold:** the classic malaria epidemic threshold, mean + 2 SD of weekly cases in the same weeks (±2) of earlier years.
+- **Risk score:** the highest estimated probability (×100) that cases reach the threshold in the next 1–4 weeks, from the model's out-of-sample validation errors. An early warning is raised when that probability passes a per-horizon cut-off chosen on the validation year.
+
+**Test-period results** (20 LGAs, 1,940 forecasts per horizon, 73 actual threshold crossings). MAE / RMSE in cases per week; lower is better:
+
+| Weeks ahead | Model | Persistence | Seasonal naive | Historical mean | Model precision / recall | Persistence precision / recall |
+|---|---|---|---|---|---|---|
+| 1 | **16.4 / 25.4** | 20.0 / 30.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.43 / 0.27 | 0.39 / 0.37 |
+| 2 | **17.1 / 26.5** | 20.7 / 29.8 | 29.9 / 44.8 | 24.3 / 36.3 | 0.30 / 0.26 | 0.37 / 0.37 |
+| 3 | **17.9 / 27.8** | 22.5 / 33.0 | 29.9 / 44.8 | 24.3 / 36.3 | 0.25 / 0.19 | 0.30 / 0.32 |
+| 4 | **18.6 / 29.4** | 24.5 / 36.1 | 29.9 / 44.8 | 24.3 / 36.3 | 0.24 / 0.22 | 0.22 / 0.26 |
+
+What this shows, honestly:
+
+- The model predicts case numbers more accurately than all three baselines at every horizon.
+- For the yes/no question "will cases cross the threshold?", the simple persistence baseline is as good as or better than the model at 1–3 weeks. Detection of crossings is modest for both.
+- **These are results on SYNTHETIC case data.** They show how well the pipeline recovers patterns built into the generator, not real-world forecasting accuracy.
+
+Retrain after changing the data (about 30 seconds):
+
+```powershell
+python -m ml.train_forecast
+```
+
+This writes `ml/models/forecast/` (serving models), `ml/metrics/forecast_metrics.json` and `ml/metrics/forecast_backtest.csv`. Seeding demo data runs the forecasts and raises or resolves `RISK_FORECAST` alerts.
+
+### 5. Laboratory review workflow
 
 1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
 2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
@@ -275,6 +307,10 @@ The FastAPI backend exposes the following endpoints.
 | GET | `/api/surveillance/overview` | Current surveillance level and key signals for every LGA |
 | GET | `/api/surveillance/locations/{id}` | Signals plus weekly series (cases, rainfall, temperature, humidity, verified lab results); `?weeks=156` |
 | GET | `/api/surveillance/sources` | Every dataset held: real or synthetic, source, coverage |
+| GET | `/api/prediction/risk` | Risk score, level, early-warning flag and 1–4 week forecasts for every LGA |
+| GET | `/api/prediction/locations/{id}` | Recent cases, latest forecasts and test-period backtest for one LGA |
+| GET | `/api/prediction/evaluation` | Model vs baselines: MAE, RMSE, precision and recall per horizon |
+| POST | `/api/prediction/run` | Recompute forecasts and update early-warning alerts |
 | POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
 | POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
 | POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |

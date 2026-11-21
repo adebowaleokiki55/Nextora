@@ -17,7 +17,7 @@ from datetime import date
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from backend.app.config import DATA_DIR
+from backend.app.config import DATA_DIR, PROJECT_ROOT
 from backend.app.core.surveillance import synthetic_cases, weather
 from backend.app.core.surveillance.metrics import CASES, WEATHER_METRICS
 from backend.app.core.surveillance.repository import bulk_insert_weekly, location_ids
@@ -28,6 +28,7 @@ from backend.app.models import (
     Alert,
     DataOrigin,
     Facility,
+    Forecast,
     LabCell,
     LabSubmission,
     Location,
@@ -179,6 +180,21 @@ def seed_surveillance(session: Session, today: date | None = None, csv_path=WEAT
     }
 
 
+FORECAST_MODEL_DIR = PROJECT_ROOT / "ml" / "models" / "forecast"
+
+
+def seed_forecasts(session: Session, model_dir=FORECAST_MODEL_DIR) -> dict[str, object]:
+    """Run the prediction engine on the seeded data, if models are trained."""
+    from backend.app.core.prediction.forecast import run_forecasts
+    from backend.app.core.prediction.model import load_bundle
+
+    bundle = load_bundle(model_dir)
+    if bundle is None:
+        return {"forecasts": "skipped: no trained model (run python -m ml.train_forecast)"}
+    result = run_forecasts(session, bundle)
+    return {"forecast_model": result["model_version"], "early_warnings": result["early_warnings"]}
+
+
 def reset_and_seed(session: Session) -> dict[str, object]:
     """Delete all scenario data and re-seed. Used by the demo reset action."""
     for model in (
@@ -186,6 +202,7 @@ def reset_and_seed(session: Session) -> dict[str, object]:
         Proposal,
         AgentRun,
         Alert,
+        Forecast,
         LabCell,
         LabSubmission,
         Observation,
@@ -196,6 +213,7 @@ def reset_and_seed(session: Session) -> dict[str, object]:
     session.commit()
     counts = seed_places(session)
     counts.update(seed_surveillance(session))
+    counts.update(seed_forecasts(session))
     return counts
 
 
@@ -204,4 +222,5 @@ def seed_if_empty(session: Session) -> bool:
         return False
     seed_places(session)
     seed_surveillance(session)
+    seed_forecasts(session)
     return True

@@ -4,13 +4,19 @@ Public weekly case data per Lagos LGA is not available, so the demo uses
 generated counts. They are always stored with data_origin=SYNTHETIC.
 
 Model (deliberately simple and documented):
-    expected = base(LGA) x year_factor x rain_effect x temp_effect x scenario
+    expected = base(LGA) x year_factor x rain_effect x temp_effect
+               x intensity x outbreaks x scenario
     cases    ~ Poisson(expected x Gamma noise)    (overdispersed counts)
 
 - rain_effect: rainfall summed over the previous 3-8 weeks (the lag for
   mosquito breeding plus parasite development), saturating via log1p.
 - temp_effect: a broad bell curve around 25 °C, near the reported optimum
   for P. falciparum transmission.
+- intensity: a slowly drifting transmission level (AR(1) on the log scale),
+  because real incidence is strongly autocorrelated from week to week.
+- outbreaks: occasional multi-week surges (rise, peak, decline) at random
+  places and times in the history, about one per LGA every 4 years. None
+  fall in the final OUTBREAK_FREE_WEEKS, which are reserved for the script.
 - scenario: the scripted demo story (Ikorodu rising in the latest weeks).
 """
 
@@ -31,6 +37,11 @@ SOURCE = (
 RAIN_LAG_MIN = 3
 RAIN_LAG_MAX = 8
 
+INTENSITY_PHI = 0.9  # week-to-week persistence of transmission intensity
+INTENSITY_SD = 0.06  # innovation SD (log scale); stationary SD ~0.14
+OUTBREAKS_PER_YEAR = 0.25
+OUTBREAK_FREE_WEEKS = 26
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -48,6 +59,32 @@ def _base_level(names: list[str], rng: np.random.Generator) -> dict[str, float]:
         if name in levels:
             levels[name] = level
     return levels
+
+
+def intensity_path(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Multiplicative AR(1) transmission intensity, mean ~1."""
+    log_level = np.zeros(n)
+    stationary_sd = INTENSITY_SD / np.sqrt(1 - INTENSITY_PHI**2)
+    log_level[0] = rng.normal(0, stationary_sd)
+    for i in range(1, n):
+        log_level[i] = INTENSITY_PHI * log_level[i - 1] + rng.normal(0, INTENSITY_SD)
+    return np.exp(log_level - stationary_sd**2 / 2)
+
+
+def outbreak_multiplier(n: int, rng: np.random.Generator) -> np.ndarray:
+    """Occasional surges shaped like real outbreaks: rise, peak, decline."""
+    multiplier = np.ones(n)
+    usable = n - OUTBREAK_FREE_WEEKS
+    if usable <= 20:
+        return multiplier
+    count = rng.poisson(OUTBREAKS_PER_YEAR * usable / 52)
+    for _ in range(count):
+        rise, fall = int(rng.integers(4, 9)), int(rng.integers(4, 9))
+        start = int(rng.integers(0, usable - rise - fall))
+        peak = rng.uniform(1.5, 2.2)
+        shape = np.concatenate([np.linspace(1, peak, rise + 1)[1:], np.linspace(peak, 1, fall + 1)[1:]])
+        multiplier[start:start + rise + fall] *= shape
+    return multiplier
 
 
 def lagged_rain(rain: pd.Series) -> pd.Series:
@@ -86,6 +123,7 @@ def generate_cases(
         year_factor = years.map({y: rng.gamma(40, 1 / 40) for y in sorted(years.unique())})
 
         expected = base[name] * year_factor * rain_effect * temp_effect
+        expected = expected * intensity_path(len(weather), rng) * outbreak_multiplier(len(weather), rng)
 
         if scenario is not None and name == scenario.location:
             ramp = np.ones(len(weather))
@@ -96,7 +134,7 @@ def generate_cases(
             expected = expected * ramp
 
         valid = expected.notna()
-        noise = rng.gamma(25, 1 / 25, size=int(valid.sum()))
+        noise = rng.gamma(40, 1 / 40, size=int(valid.sum()))
         cases = pd.Series(np.nan, index=weather.index)
         cases[valid] = rng.poisson(expected[valid].to_numpy() * noise)
 
