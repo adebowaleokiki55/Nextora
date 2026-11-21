@@ -1,0 +1,171 @@
+/* Lab submission + review workflow. Matches the Nextora explorer palette. */
+
+.lab-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.lab-badge.synthetic { background: #fff1d6; color: #8b5a00; border: 1px dashed #d9a441; }
+.lab-badge.real { background: #e6f4ee; color: #12684d; border: 1px solid #b8dccd; }
+.lab-badge.pending { background: #eef2ff; color: #3949ab; }
+.lab-badge.verified { background: #e6f4ee; color: #12684d; }
+.lab-badge.rejected { background: #f4f4f4; color: #5f6b67; }
+
+/* ---------- Submit panel (inside the smear results card) ---------- */
+
+.lab-submit-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #dfe7e5;
+  border-radius: 11px;
+  background: #fbfdfc;
+}
+.lab-submit-panel h3 { margin: 0 0 4px; font-size: 13px; }
+.lab-submit-panel > p { margin: 0 0 12px; color: #6d7b76; font-size: 10.5px; line-height: 1.6; }
+
+.lab-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.lab-field label { color: #5a6863; font-size: 10px; font-weight: 700; }
+.lab-field input,
+.lab-field select,
+.lab-field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #d9e3e0;
+  border-radius: 8px;
+  background: #fff;
+  color: #18252b;
+  font: inherit;
+  font-size: 12px;
+}
+.lab-field textarea { min-height: 70px; resize: vertical; }
+.lab-field small { color: #8a9892; font-size: 9.5px; line-height: 1.5; }
+.lab-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.lab-origin-toggle {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 4px 0 6px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff9eb;
+  border: 1px solid #f3e6c6;
+  color: #6e5520;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.lab-origin-toggle input { margin-top: 2px; }
+
+.lab-success {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 9px;
+  background: #e6f4ee;
+  color: #12684d;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.lab-success a { color: #0d5a42; font-weight: 700; }
+.lab-error { margin-top: 10px; color: #b3261e; font-size: 11px; }
+
+/* ---------- Review page ---------- */
+
+.lab-review-main { padding: 28px 5.5% 40px; max-width: 1400px; margin: 0 auto; }
+.lab-review-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.lab-review-head h1 { margin: 6px 0 4px; font-family: Manrope, sans-serif; font-size: 28px; }
+.lab-review-head p { margin: 0; color: #6d7b76; font-size: 12.5px; max-width: 640px; line-height: 1.6; }
+
+.lab-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.lab-tabs button {
+  padding: 8px 13px;
+  border-radius: 8px;
+  border: 1px solid #dfe7e5;
+  background: #fff;
+  color: #42534e;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lab-tabs button.active { background: #167c5c; border-color: #167c5c; color: #fff; }
+
+.lab-review-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .lab-review-grid { grid-template-columns: 1fr; } }
+
+.lab-card { background: #fff; border: 1px solid #e5ece9; border-radius: 14px; padding: 16px; }
+
+.lab-queue { display: flex; flex-direction: column; gap: 8px; max-height: 75vh; overflow: auto; }
+.lab-queue-item {
+  text-align: left;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #e5ece9;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.lab-queue-item:hover { border-color: #b8dccd; }
+.lab-queue-item.selected { border-color: #167c5c; box-shadow: 0 0 0 2px #167c5c22; }
+.lab-queue-item .line { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.lab-queue-item strong { font-size: 12px; }
+.lab-queue-item span { color: #6d7b76; font-size: 10.5px; }
+.lab-empty { color: #8a9892; font-size: 11.5px; padding: 16px 4px; line-height: 1.6; }
+
+.lab-detail-top { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
+@media (max-width: 1100px) { .lab-detail-top { grid-template-columns: 1fr; } }
+.lab-image-frame {
+  border-radius: 10px;
+  background: #0f1a1e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  overflow: hidden;
+}
+.lab-image-frame img { max-width: 100%; max-height: 520px; display: block; }
+
+.lab-facts { display: flex; flex-direction: column; gap: 7px; font-size: 11.5px; }
+.lab-facts .fact { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #f0f4f2; padding-bottom: 6px; }
+.lab-facts .fact span:first-child { color: #6d7b76; }
+.lab-facts .fact strong { text-align: right; }
+
+.lab-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.lab-counts div { background: #f7faf8; border-radius: 9px; padding: 9px; }
+.lab-counts span { display: block; color: #6d7b76; font-size: 9.5px; }
+.lab-counts strong { font-size: 18px; }
+
+.lab-review-form { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eef3f1; }
+.lab-review-form h3 { margin: 0 0 4px; font-size: 13px; }
+.lab-review-form > p { margin: 0 0 12px; color: #6d7b76; font-size: 10.5px; line-height: 1.6; }
+.lab-decisions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+@media (max-width: 640px) { .lab-decisions { grid-template-columns: 1fr; } }
+.lab-decisions button {
+  min-height: 42px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.lab-decisions .positive { background: #b3261e; color: #fff; }
+.lab-decisions .negative { background: #167c5c; color: #fff; }
+.lab-decisions .reject { background: #fff; color: #42534e; border-color: #dfe7e5; }
+
+.lab-cells-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+.lab-cells-table th { text-align: left; color: #8a9892; font-size: 9.5px; font-weight: 700; padding: 6px 4px; border-bottom: 1px solid #eef3f1; }
+.lab-cells-table td { padding: 6px 4px; border-bottom: 1px solid #f4f7f6; }
+
+.lab-model-card { margin-top: 18px; font-size: 11px; color: #42534e; line-height: 1.6; }
+.lab-model-card h3 { margin: 0 0 6px; font-size: 12.5px; }
+.lab-model-card ul { margin: 6px 0 0; padding-left: 18px; }

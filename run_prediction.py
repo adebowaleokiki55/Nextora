@@ -71,25 +71,22 @@ try:
             if prediction == 0:  # "Parasitized (Infected)"
                 infected_count += 1
 
-    # 5. Output patient-level diagnostics
+    # 5. Summarise the candidate regions (research output, not a diagnosis)
     if total_cells == 0:
-        print("\n[Warning] No individual red blood cells could be detected. Check your threshold limits.")
+        print("\n[Warning] No candidate cell regions were detected. Check your threshold limits.")
     else:
-        parasitemia_rate = (infected_count / total_cells) * 100
-        print("\n" + "="*40)
-        print(" DIAGNOSTIC ANALYSIS REPORT")
-        print("="*40)
-        print(f"Total Red Blood Cells Analyzed: {total_cells}")
-        print(f"Infected Cells Detected:        {infected_count}")
-        print(f"Calculated Parasitemia Rate:    {parasitemia_rate:.2f}%")
-        print("-"*40)
-        
-        # Patient status based on calculated load
-        if infected_count > 0:
-            print("Final System Verdict:           MALARIA POSITIVE")
-        else:
-            print("Final System Verdict:           MALARIA NEGATIVE")
-        print("="*40)
+        flagged_share = (infected_count / total_cells) * 100
+        print("\n" + "="*56)
+        print(" EXPERIMENTAL CANDIDATE-REGION SUMMARY (research prototype)")
+        print("="*56)
+        print(f"Candidate regions analysed:            {total_cells}")
+        print(f"Regions the model classed parasitized: {infected_count}")
+        print(f"Share of regions classed parasitized:  {flagged_share:.2f}%")
+        print("-"*56)
+        print("This is not a diagnosis and not a validated parasitemia")
+        print("measurement. Regions may not be individual cells. A qualified")
+        print("laboratory professional must review the slide.")
+        print("="*56)
 
 except FileNotFoundError:
     print("\n[Error] Drop a test blood smear image named 'cell_image.png' into this folder to test it!")

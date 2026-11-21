@@ -1,8 +1,15 @@
 fastapi
 uvicorn
 python-multipart
+python-dotenv
+pydantic>=2
+SQLAlchemy>=2.0
+psycopg[binary]
 torch
 torchvision
 Pillow
 opencv-python-headless
+numpy
 requests
+anthropic>=2.8
+openai>=1.100

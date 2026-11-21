@@ -33,10 +33,15 @@ def detect_candidate_cells(
     max_area: int = 50000,
 ):
     """
-    Find heuristic candidate regions using contours.
+    Find heuristic candidate cell regions.
+
+    Steps: adaptive threshold, morphological opening, contours, then a
+    distance-transform watershed that splits blobs containing several cell
+    centres (touching or overlapping cells). Area and aspect-ratio filters
+    remove debris and clumps that cannot be separated.
 
     These candidates are not guaranteed to be individual cells.
-    Contour area thresholds apply to the working image.
+    Area thresholds apply to the working image.
     """
     if image is None or image.size == 0:
         raise ValueError("The supplied image is empty.")
@@ -103,15 +108,31 @@ def detect_candidate_cells(
             cv2.CHAIN_APPROX_SIMPLE,
         )
 
-        candidates = []
+        typical_radius = _typical_cell_radius(contours, min_area, max_area)
+
+        # Each region is (x, y, w, h, area) in working-image coordinates.
+        regions = []
 
         for contour in contours:
             area = cv2.contourArea(contour)
 
-            if not min_area <= area <= max_area:
+            # Too small to hold even one cell.
+            if area < min_area * 0.5:
                 continue
 
-            x, y, w, h = cv2.boundingRect(contour)
+            split = _split_touching_cells(working, contour, typical_radius)
+
+            if split is None:
+                # A single cell (one centre): same handling as before.
+                regions.append((*cv2.boundingRect(contour), area))
+            else:
+                regions.extend(split)
+
+        candidates = []
+
+        for x, y, w, h, area in regions:
+            if not min_area <= area <= max_area:
+                continue
 
             aspect_ratio = w / max(h, 1)
 
@@ -147,6 +168,86 @@ def detect_candidate_cells(
         cleaned = None
         contours = None
         kernel = None
+
+
+def _typical_cell_radius(contours, min_area: int, max_area: int) -> float:
+    """Median radius of blobs that look like one whole, roughly round cell."""
+    radii = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+
+        if not min_area <= area <= max_area:
+            continue
+
+        hull_area = cv2.contourArea(cv2.convexHull(contour))
+
+        if hull_area > 0 and area / hull_area >= 0.9:
+            radii.append(np.sqrt(area / np.pi))
+
+    if radii:
+        return float(np.median(radii))
+
+    return float(np.sqrt(min_area / np.pi) * 1.5)
+
+
+def _split_touching_cells(working: np.ndarray, contour, typical_radius: float):
+    """
+    Split one blob into separate cells with a distance-transform watershed.
+
+    Returns None when the blob has a single cell centre (left unchanged),
+    otherwise a list of (x, y, w, h, area) regions in working coordinates.
+    """
+    x, y, w, h = cv2.boundingRect(contour)
+    pad = 2
+    x0, y0 = max(0, x - pad), max(0, y - pad)
+    x1 = min(working.shape[1], x + w + pad)
+    y1 = min(working.shape[0], y + h + pad)
+
+    mask = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, cv2.FILLED, offset=(-x0, -y0))
+
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+
+    # Cell centres: local maxima of the distance map that sit deep enough
+    # inside the blob to be the middle of a cell-sized disc.
+    size = max(3, int(typical_radius * 1.5) | 1)
+    neighbourhood = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    local_max = cv2.dilate(dist, neighbourhood)
+    peaks = ((dist >= local_max - 1e-3) & (dist >= typical_radius * 0.5)).astype(np.uint8)
+
+    # Merge flat-topped maxima that belong to the same centre.
+    peaks = cv2.dilate(peaks, np.ones((3, 3), np.uint8))
+    peak_count, markers = cv2.connectedComponents(peaks)
+
+    if peak_count - 1 <= 1:
+        return None
+
+    # Watershed labels: 1 = background, 2.. = cell centres, 0 = to decide.
+    markers = markers + 1
+    markers[(mask > 0) & (peaks == 0)] = 0
+    markers[mask == 0] = 1
+
+    roi = np.ascontiguousarray(working[y0:y1, x0:x1])
+    cv2.watershed(roi, markers)
+
+    regions = []
+
+    for label in range(2, peak_count + 1):
+        ys, xs = np.nonzero((markers == label) & (mask > 0))
+
+        if xs.size == 0:
+            continue
+
+        regions.append((
+            x0 + int(xs.min()),
+            y0 + int(ys.min()),
+            int(xs.max() - xs.min() + 1),
+            int(ys.max() - ys.min() + 1),
+            float(xs.size),
+        ))
+
+    return regions
 
 
 def analyze_smear(

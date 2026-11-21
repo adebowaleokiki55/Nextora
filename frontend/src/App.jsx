@@ -2,6 +2,7 @@
 import LandingPage from "./LandingPage";
 import Analyzer from "./Analyzer";
 import TreatmentSupport from "./TreatmentSupport";
+import LabReview from "./LabReview";
 import { ArrowLeft, Microscope } from "lucide-react";
 import "./LandingPage.css";
 
@@ -33,6 +34,19 @@ export default function App() {
 
   if (view === "analyzer") {
     return <Analyzer />;
+  }
+
+  if (view === "lab-review") {
+    return (
+      <div className="nx-landing">
+        <WorkspaceHeader title="Lab review queue" />
+        <LabReview />
+        <footer className="nx-workspace-disclaimer">
+          Decision-support research prototype · Every AI result requires
+          qualified laboratory review · Not a diagnostic tool
+        </footer>
+      </div>
+    );
   }
 
   if (view === "treatment") {

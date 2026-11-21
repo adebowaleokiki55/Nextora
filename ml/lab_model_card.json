@@ -1,0 +1,15 @@
+{
+  "model_name": "PlasmoSENet",
+  "task": "Two-class classification of single, pre-cropped red-blood-cell images: parasitized vs uninfected.",
+  "training_data": "NIH Malaria Cell Images dataset (National Library of Medicine), 27,558 single-cell crops from thin blood smears.",
+  "trained_by": "Project developer",
+  "intended_use": "Decision-support research prototype. Every result must be reviewed by a qualified laboratory professional. Not a diagnostic tool and not a validated parasite counter.",
+  "limitations": [
+    "Trained on isolated cell crops; whole-smear photos are segmented heuristically first, so crops can differ from the training images.",
+    "Confidence scores are not calibrated clinical probabilities.",
+    "Not validated on images from Nigerian laboratories, other microscopes, stains or cameras."
+  ],
+  "metrics": null,
+  "metrics_provenance": "Held-out test metrics are not yet available: the training run and its train/test split were not recorded in this repository.",
+  "_how_to_add_metrics": "If you have the numbers from your training run, set metrics to {\"accuracy\": 0.0, \"sensitivity\": 0.0, \"specificity\": 0.0, \"auc\": 0.0, \"test_images\": 0} and describe where they came from in metrics_provenance."
+}

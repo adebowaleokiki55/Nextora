@@ -4,6 +4,7 @@ import {
   AlertCircle,
   Camera,
   CheckCircle2,
+  ClipboardList,
   FileImage,
   Focus,
   Maximize2,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import "./App.css";
 import TreatmentSupport from "./TreatmentSupport";
+import LabSubmitPanel from "./LabSubmitPanel";
 
 
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -282,6 +284,10 @@ export default function App() {
           <span className="workspace-label">
             <Activity size={15} /> Cell Explorer
           </span>
+
+          <a className="workspace-label" href="/?view=lab-review">
+            <ClipboardList size={15} /> Lab review queue
+          </a>
 
           <span className="status-pill">
             <span className="status-dot" />
@@ -862,6 +868,8 @@ export default function App() {
                       parasitemia measurement or a malaria diagnosis.
                     </p>
                   </div>
+
+                  <LabSubmitPanel file={file} />
 
                   <button
                     type="button"

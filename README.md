@@ -31,10 +31,17 @@ The project combines a PyTorch image classification model with a FastAPI backend
 ### 2. Whole-smear analysis
 
 1. The user uploads a larger blood-smear image.
-2. The backend uses OpenCV-based image processing and contour heuristics to identify candidate regions.
+2. The backend uses OpenCV to find candidate cell regions: adaptive threshold, morphological opening, contours, then a distance-transform watershed that splits touching or overlapping cells. Area and shape filters drop debris.
 3. Candidate regions are cropped from the original image.
 4. The existing classification model predicts a class for each crop.
 5. The backend returns the candidate-region results, counts, and an annotated image.
+
+### 3. Laboratory review workflow
+
+1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
+2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
+3. In the **Lab review queue** (`/?view=lab-review`), a qualified laboratory professional examines the slide and either verifies it with their own reading (positive or negative) or rejects it with a reason.
+4. Only verified submissions become surveillance observations for that location (`lab_smears_reviewed`, `lab_smears_positive`). A verified positive also raises an alert for the command centre. The reviewer's reading is recorded, not the model's.
 
 **Important limitation:** Candidate regions are not guaranteed to correspond to individual cells. The whole-smear pipeline is experimental, and classifying crops from full-smear images may produce different results from classifying isolated cell images.
 
@@ -47,6 +54,8 @@ The project combines a PyTorch image classification model with a FastAPI backend
 | Image processing | OpenCV |
 | Machine learning utilities | scikit-learn |
 | Backend API | FastAPI |
+| Database | SQLAlchemy: SQLite locally, PostgreSQL in deployment |
+| AI agents | Any provider: Anthropic Claude, OpenAI-compatible APIs, or Ollama |
 | Frontend | React, Vite |
 | Frontend styling | CSS |
 | Frontend hosting | Vercel |
@@ -105,29 +114,38 @@ Standard deviation:
 [0.229, 0.224, 0.225]
 ```
 
-Model performance metrics are not included here because independently verified evaluation results have not been provided. Accuracy, precision, recall, F1-score, and confusion-matrix results should be added after evaluation on an appropriately separated test dataset.
+Model performance metrics are not included here because independently verified evaluation results have not been provided. The model card in `ml/lab_model_card.json` (served at `/api/lab/model-card` and shown on the review page) is where metrics from the training run go, together with a note on where they came from. Accuracy, precision, recall, F1-score, and confusion-matrix results should be added after evaluation on an appropriately separated test dataset.
 
 ## Project Structure
+
+Nextora is growing from a blood-smear analyser into a five-module malaria early-warning and response platform (surveillance, prediction, AI command centre, supply intelligence and the existing laboratory module), sharing one backend and one database. See `PROJECT_SPEC.md`.
 
 ```text
 Malaria_Detection/
 ├── backend/
-│   ├── main.py
+│   ├── main.py                 # entry point: uvicorn backend.main:app
 │   ├── requirements.txt
-│   └── smear_analysis.py
-├── frontend/
-│   └── src/
-│       ├── App.jsx
-│       ├── App.css
-│       └── index.css
-├── model.pth
-├── plasmosenet.py
-├── run_prediction.py
-├── cell_image.png
-└── README.md
+│   ├── requirements-dev.txt    # + pytest
+│   ├── app/
+│   │   ├── main.py             # FastAPI app, routers, startup
+│   │   ├── config.py           # settings from environment / .env
+│   │   ├── db.py               # SQLAlchemy engine (SQLite or PostgreSQL)
+│   │   ├── models.py           # shared tables: locations, facilities,
+│   │   │                       #   observations, alerts, proposals,
+│   │   │                       #   agent_runs, agent_messages
+│   │   ├── core/               # pure Python, no FastAPI imports
+│   │   │   ├── lab/            # PlasmoSENet, inference, smear analysis
+│   │   │   ├── llm/            # Anthropic / OpenAI-compatible / Ollama clients
+│   │   │   └── treatment_engine.py
+│   │   ├── agents/             # tool-calling loop and agent definitions
+│   │   └── modules/            # one FastAPI router per module
+│   └── tests/                  # pytest
+├── frontend/                   # React + Vite
+├── data/                       # SQLite database (git-ignored) and datasets
+├── model.pth                   # PlasmoSENet weights
+├── plasmosenet.py              # compatibility shim -> backend/app/core/lab/
+└── .env.example                # all configuration options
 ```
-
-The structure above highlights the main project files. Other configuration files, dependencies, and frontend assets may also be present.
 
 ## Running Locally
 
@@ -165,7 +183,12 @@ Ensure `model.pth` and `plasmosenet.py` are available at the paths expected by t
 
 ### 3. Configure environment variables
 
-Configure the frontend API URL to point to your local FastAPI server.
+**Backend.** Copy `.env.example` to `.env` in the project root. Everything is optional:
+
+- **AI provider (any API key works).** The explanation agents run on Anthropic Claude, any OpenAI-compatible API (OpenAI, Groq, OpenRouter, Gemini, Together, Mistral, DeepSeek, LM Studio, vLLM...), or Ollama (local or Ollama Cloud). Set `LLM_PROVIDER`, `LLM_API_KEY` and `LLM_MODEL` (plus `LLM_BASE_URL` for OpenAI-compatible providers). If `LLM_PROVIDER` is not set, the first of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OLLAMA_API_KEY` found is used. Without any key, image analysis still works and the agent endpoints return a clear 503 message. `GET /api/health` shows which provider is active.
+- **Database.** SQLite at `data/nextora.db` by default; tables are created on startup. Set `DATABASE_URL` to a PostgreSQL URL in deployment (`postgres://` URLs from Render are accepted).
+
+**Frontend.** Configure the frontend API URL to point to your local FastAPI server.
 
 Create a `.env` file inside `frontend/`:
 
@@ -202,15 +225,36 @@ npm run dev
 
 Open the local URL printed by Vite in your terminal.
 
+### 6. Run the tests
+
+```powershell
+pip install -r backend/requirements-dev.txt
+python -m pytest
+```
+
+The tests use a temporary database and a fake AI provider, so they need no API key or network access.
+
 ## API Endpoints
 
 The FastAPI backend exposes the following endpoints.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/health` | Check backend health |
+| GET | `/api/health` | Backend, model, database and AI-provider status |
+| GET | `/api/diagnostics/memory` | Process memory and inference-slot status |
 | POST | `/api/predict` | Classify a single-cell image |
 | POST | `/api/analyze-smear` | Perform experimental whole-smear candidate-region analysis |
+| POST | `/api/agent/explain` | AI explanation of a single-cell or whole-smear result |
+| POST | `/api/lab/submissions` | Analyse a smear and store it as **PENDING_REVIEW** (facility, sample date, submitter, optional slide number; `data_origin` defaults to SYNTHETIC) |
+| GET | `/api/lab/submissions` | List submissions; filter by `status`, `location_id`, `facility_id` |
+| GET | `/api/lab/submissions/{id}` | One submission with its cell-level results |
+| GET | `/api/lab/submissions/{id}/annotated.png` | Annotated smear image |
+| POST | `/api/lab/submissions/{id}/review` | Qualified review: `VERIFIED` (with the reviewer's own POSITIVE/NEGATIVE reading) or `REJECTED` (with a reason) |
+| GET | `/api/lab/model-card` | Model description, training data, limitations and metrics status |
+| GET | `/api/locations`, `/api/facilities` | Monitored Lagos LGAs and participating facilities |
+| POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
+| POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
+| POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |
 
 Open `/docs` on the running backend to inspect the request schemas, required image-upload fields, and response formats.
 
