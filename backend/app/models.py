@@ -277,6 +277,46 @@ class Forecast(Base):
 
 
 # --------------------------------------------------------------------------
+# Module 4: stock levels and the stock ledger
+# --------------------------------------------------------------------------
+
+class StockLevel(Base):
+    """Current quantity on hand of one item at one facility."""
+
+    __tablename__ = "stock_levels"
+    __table_args__ = (Index("ix_stock_levels_facility_item", "facility_id", "item_code", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    facility_id: Mapped[int] = mapped_column(ForeignKey("facilities.id"))
+    item_code: Mapped[str] = mapped_column(String(30))
+    quantity_on_hand: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    data_origin: Mapped[DataOrigin] = mapped_column(_enum(DataOrigin))
+    source: Mapped[str] = mapped_column(String(255))
+
+    facility: Mapped[Facility] = relationship()
+
+
+class StockTransaction(Base):
+    """Ledger entry. quantity is signed: + receipt / transfer in, - use / transfer out."""
+
+    __tablename__ = "stock_transactions"
+    __table_args__ = (Index("ix_stock_tx_facility_item_date", "facility_id", "item_code", "occurred_on"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    facility_id: Mapped[int] = mapped_column(ForeignKey("facilities.id"))
+    item_code: Mapped[str] = mapped_column(String(30))
+    occurred_on: Mapped[date] = mapped_column(Date)
+    # CONSUMPTION | RECEIPT | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT
+    kind: Mapped[str] = mapped_column(String(20))
+    quantity: Mapped[int] = mapped_column(Integer)
+    reference: Mapped[str | None] = mapped_column(String(120))  # e.g. proposal:12
+    data_origin: Mapped[DataOrigin] = mapped_column(_enum(DataOrigin))
+    source: Mapped[str] = mapped_column(String(255))
+
+
+# --------------------------------------------------------------------------
 # Common alert system
 # --------------------------------------------------------------------------
 

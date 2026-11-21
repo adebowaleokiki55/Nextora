@@ -7,12 +7,16 @@
   exists, otherwise SYNTHETIC from a climatology.
 - Weekly malaria cases: always SYNTHETIC, driven by the weather, with the
   scripted Ikorodu rise in the latest weeks.
+- Stock: SYNTHETIC consumption (from each LGA's cases) and stock on hand,
+  with three Ikorodu health centres short of RDT kits and nearby surplus.
 """
 
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
+
+import numpy as np
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -34,6 +38,8 @@ from backend.app.models import (
     Location,
     Observation,
     Proposal,
+    StockLevel,
+    StockTransaction,
 )
 
 LGA_SOURCE = "Lagos LGA names; approximate centre points compiled by hand (not an official dataset)"
@@ -195,11 +201,91 @@ def seed_forecasts(session: Session, model_dir=FORECAST_MODEL_DIR) -> dict[str, 
     return {"forecast_model": result["model_version"], "early_warnings": result["early_warnings"]}
 
 
+STOCK_SOURCE = "Nextora demo scenario (synthetic stock and consumption)"
+LEDGER_WEEKS = 12
+# Share of an LGA's confirmed cases seen at each demo facility.
+HEALTH_CENTRE_SHARE = {"Ikorodu": 0.12}
+DEFAULT_HEALTH_CENTRE_SHARE = 0.35
+LAB_RDT_SHARE = 0.10
+# Scripted stock on hand, in weeks of recent consumption.
+SCENARIO_STOCK_WEEKS = {
+    ("Ikorodu Demo Health Centre A", "RDT"): 0.4,
+    ("Ikorodu Demo Health Centre B", "RDT"): 0.0,
+    ("Ikorodu Demo Health Centre C", "RDT"): 1.1,
+    ("Ikorodu Demo Health Centre D", "RDT"): 7.5,
+    ("Ikorodu Demo Laboratory", "RDT"): 16.0,
+    ("Kosofe Demo Health Centre", "RDT"): 15.0,
+    ("Epe Demo Health Centre", "RDT"): 14.0,  # surplus, but beyond the transfer radius
+}
+
+
+def seed_supply(session: Session, seed: int = 11) -> dict[str, object]:
+    """Synthetic stock ledger (12 weeks of consumption) and current stock levels."""
+    from backend.app.core.supply.items import ITEMS
+    from backend.app.core.supply.service import run_supply_scan
+
+    rng = np.random.default_rng(seed)
+    last_week = session.scalar(select(func.max(Observation.period_start)).where(Observation.metric == CASES))
+    if last_week is None:
+        return {"stock": "skipped: no case data"}
+    weeks = [last_week - timedelta(weeks=k) for k in range(LEDGER_WEEKS - 1, -1, -1)]
+    cases = {
+        (row.location_id, row.period_start): row.value
+        for row in session.scalars(
+            select(Observation).where(Observation.metric == CASES, Observation.period_start >= weeks[0])
+        )
+    }
+
+    levels = transactions = 0
+    for facility in session.scalars(select(Facility).order_by(Facility.id)):
+        lga = facility.location.name
+        if facility.has_laboratory:
+            items = {"RDT": LAB_RDT_SHARE}
+        else:
+            share = HEALTH_CENTRE_SHARE.get(lga, DEFAULT_HEALTH_CENTRE_SHARE)
+            items = {code: share for code in ITEMS}
+
+        for code, share in items.items():
+            item = ITEMS[code]
+            used = []
+            for week in weeks:
+                expected = cases.get((facility.location_id, week), 0.0) * share * item.per_case
+                quantity = int(round(expected * rng.gamma(30, 1 / 30)))
+                used.append(quantity)
+                session.add(
+                    StockTransaction(
+                        facility_id=facility.id, item_code=code, occurred_on=week, kind="CONSUMPTION",
+                        quantity=-quantity, data_origin=DataOrigin.SYNTHETIC, source=STOCK_SOURCE,
+                    )
+                )
+                transactions += 1
+
+            recent = float(np.mean(used[-8:]))
+            weeks_on_hand = SCENARIO_STOCK_WEEKS.get((facility.name, code), float(rng.uniform(3.5, 9.0)))
+            session.add(
+                StockLevel(
+                    facility_id=facility.id, item_code=code, quantity_on_hand=int(round(recent * weeks_on_hand)),
+                    data_origin=DataOrigin.SYNTHETIC, source=STOCK_SOURCE,
+                )
+            )
+            levels += 1
+
+    session.commit()
+    scan = run_supply_scan(session)
+    return {
+        "stock_levels": levels,
+        "stock_transactions": transactions,
+        "supply_shortages": [f"{s['facility']['name']} {s['item']['code']}" for s in scan["shortages"]],
+    }
+
+
 def reset_and_seed(session: Session) -> dict[str, object]:
     """Delete all scenario data and re-seed. Used by the demo reset action."""
     for model in (
         AgentMessage,
         Proposal,
+        StockTransaction,
+        StockLevel,
         AgentRun,
         Alert,
         Forecast,
@@ -214,6 +300,7 @@ def reset_and_seed(session: Session) -> dict[str, object]:
     counts = seed_places(session)
     counts.update(seed_surveillance(session))
     counts.update(seed_forecasts(session))
+    counts.update(seed_supply(session))
     return counts
 
 
@@ -223,4 +310,5 @@ def seed_if_empty(session: Session) -> bool:
     seed_places(session)
     seed_surveillance(session)
     seed_forecasts(session)
+    seed_supply(session)
     return True

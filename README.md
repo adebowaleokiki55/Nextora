@@ -88,7 +88,20 @@ python -m ml.train_forecast
 
 This writes `ml/models/forecast/` (serving models), `ml/metrics/forecast_metrics.json` and `ml/metrics/forecast_backtest.csv`. Seeding demo data runs the forecasts and raises or resolves `RISK_FORECAST` alerts.
 
-### 5. Laboratory review workflow
+### 5. Medical supply and facility intelligence (Module 4)
+
+Tracks malaria RDT kits, artemether-lumefantrine (ACT) courses and injectable artesunate at every facility. Stock and consumption in the demo are **SYNTHETIC**: consumption is derived from each LGA's cases, and three Ikorodu health centres are scripted short of RDT kits.
+
+All quantities are computed by deterministic code (`backend/app/core/supply/calculations.py`); agents only read and explain them:
+
+- **Expected weekly demand** = average consumption over the last 8 weeks × the location's forecast ratio (next 4 weeks of forecast cases ÷ last 8 weeks of cases), bounded 0.5–3.0. **Precaution:** where the malaria risk score is 50 or more, planned demand never drops below recent consumption.
+- **Status** by weeks of stock left: STOCKOUT (none), CRITICAL (< 1 week), LOW (< 2 weeks), OK, SURPLUS (> 10 weeks).
+- **Shortage quantity** restores 6 weeks of stock, rounded up to whole packs.
+- **Redistribution:** most urgent facility first (worst status, then higher area risk), nearest donor first, within 40 km. Donors keep at least 6 weeks of their own demand and give only whole packs. Anything not covered becomes an order to the central medical store.
+- **Alerts:** `SUPPLY_SHORTAGE` alerts are raised, updated and resolved by each scan. Severity is raised one level in areas with a risk score of 50 or more.
+- **Nothing moves without approval.** The transfer function re-checks the donor's stock at the moment of execution and refuses if the plan is out of date. It is only called after a human approves a proposal in the command centre.
+
+### 6. Laboratory review workflow
 
 1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
 2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
@@ -311,6 +324,12 @@ The FastAPI backend exposes the following endpoints.
 | GET | `/api/prediction/locations/{id}` | Recent cases, latest forecasts and test-period backtest for one LGA |
 | GET | `/api/prediction/evaluation` | Model vs baselines: MAE, RMSE, precision and recall per horizon |
 | POST | `/api/prediction/run` | Recompute forecasts and update early-warning alerts |
+| GET | `/api/supply/items`, `/api/supply/policy` | Tracked commodities and the stock rules in plain language |
+| GET | `/api/supply/status` | Stock assessment per facility and item; filter by `item_code`, `location_id`, `status` |
+| GET | `/api/supply/shortages` | Facilities at risk of running out, most urgent first |
+| GET | `/api/supply/redistribution` | Recommended transfers and central orders (recommendation only) |
+| POST | `/api/supply/scan` | Re-assess stock and update shortage alerts |
+| GET | `/api/supply/facilities/{id}` | One facility's stock and 12-week ledger |
 | POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
 | POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
 | POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |
