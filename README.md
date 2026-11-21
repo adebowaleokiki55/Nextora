@@ -118,7 +118,21 @@ Five agents coordinate the response for a selected location:
 - **Modes:** `live` uses the configured AI provider (any provider; see `.env.example`). `offline` is the **OFFLINE DEMO MODE**: a scripted sequence that calls the same real tools, with every message labelled as scripted. It needs no API key or internet. `auto` (the default) picks live when a provider is configured, otherwise offline. A failed live run is recorded as FAILED; it does not silently switch to the script.
 - When a run completes, the location's open alerts are marked ACKNOWLEDGED.
 
-### 7. Laboratory review workflow
+### 7. Command-centre dashboard
+
+Open `http://localhost:5173/?view=command` (also linked from the home page). One screen brings the five modules together:
+
+- **Headline numbers:** highest-risk LGA, early warnings, unresolved alerts, supply shortages, proposals awaiting approval, lab results awaiting review.
+- **Map (Leaflet + OpenStreetMap):** LGAs coloured by forecast risk and sized by next week's forecast cases; facilities shown red when short of stock. Click a circle to inspect it.
+- **Location panel (Plotly):** reported cases, the 1–4 week forecast with its 80% range and alert threshold, past 1-week forecasts from the backtest, surveillance signals, rainfall against cases, and facility stock.
+- **AI command centre:** choose a location and mode (Auto, Live AI or Offline demo) and press **Run response**. Agent steps stream in live, followed by the Policy Agent's situation report. Offline runs are clearly badged as scripted.
+- **Approval queue:** enter your name, then **Approve** or **Reject** each proposal. Approving a transfer moves the stock; outcomes (executed, failed, rejected) are listed.
+- **Alerts** from every module (acknowledge or resolve), **forecast accuracy vs baselines**, **data sources** (REAL or SYNTHETIC), and links to the lab review queue.
+- **Seed demo data** resets everything to the synthetic Lagos scenario (about 20 seconds).
+
+SYNTHETIC badges appear on every chart, signal, alert and table that uses synthetic data, and a banner states what is synthetic. The dashboard needs internet for map tiles; everything else is served by the local backend.
+
+### 8. Laboratory review workflow
 
 1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
 2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
@@ -138,7 +152,7 @@ Five agents coordinate the response for a selected location:
 | Backend API | FastAPI |
 | Database | SQLAlchemy: SQLite locally, PostgreSQL in deployment |
 | AI agents | Any provider: Anthropic Claude, OpenAI-compatible APIs, or Ollama |
-| Frontend | React, Vite |
+| Frontend | React, Vite; command centre uses Tailwind CSS, Leaflet (react-leaflet) and Plotly |
 | Frontend styling | CSS |
 | Frontend hosting | Vercel |
 | Backend hosting | Render |

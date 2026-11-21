@@ -1,10 +1,14 @@
 
+import { Suspense, lazy } from "react";
 import LandingPage from "./LandingPage";
 import Analyzer from "./Analyzer";
 import TreatmentSupport from "./TreatmentSupport";
 import LabReview from "./LabReview";
 import { ArrowLeft, Microscope } from "lucide-react";
 import "./LandingPage.css";
+
+// Loaded on its own so Tailwind and the map/chart libraries stay off other pages.
+const Dashboard = lazy(() => import("./dashboard/Dashboard"));
 
 function WorkspaceHeader({ title }) {
   return (
@@ -34,6 +38,14 @@ export default function App() {
 
   if (view === "analyzer") {
     return <Analyzer />;
+  }
+
+  if (view === "command") {
+    return (
+      <Suspense fallback={<div style={{ padding: 40, fontFamily: "sans-serif" }}>Loading command centre…</div>}>
+        <Dashboard />
+      </Suspense>
+    );
   }
 
   if (view === "lab-review") {

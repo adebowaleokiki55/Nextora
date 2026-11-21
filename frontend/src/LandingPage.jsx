@@ -141,6 +141,8 @@ export default function LandingPage() {
           <a href="#platform">Platform</a>
           <a href="#workflow">How it works</a>
           <a href="#research">Research notes</a>
+          <a href="/?view=command">Command centre</a>
+          <a href="/?view=lab-review">Lab review</a>
         </nav>
 
         <button className="nx-nav-cta" onClick={openAnalyzer}>
@@ -172,6 +174,9 @@ export default function LandingPage() {
               <button className="nx-button-primary" onClick={openAnalyzer}>
                 Try the analyzer <ArrowRight size={18} />
               </button>
+              <a className="nx-button-secondary" href="/?view=command">
+                Open command centre <ArrowRight size={16} />
+              </a>
               <a className="nx-button-secondary" href="#platform">
                 Explore the platform <ArrowDown size={16} />
               </a>

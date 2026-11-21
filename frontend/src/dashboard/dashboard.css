@@ -1,0 +1,86 @@
+/* Tailwind for the command centre only. Preflight (the global reset) is
+   deliberately not imported, so the existing Nextora pages keep their look.
+   Utilities are NOT put in a cascade layer: the older global stylesheets are
+   unlayered (e.g. `button { font: inherit }`) and would otherwise win. */
+@layer theme, base;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+@source "./";
+
+@layer base {
+  .nx-dash,
+  .nx-dash *,
+  .nx-dash *::before,
+  .nx-dash *::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--color-slate-200);
+  }
+
+  .nx-dash {
+    font-family: "DM Sans", system-ui, sans-serif;
+    color: var(--color-slate-800);
+    background: var(--color-slate-50);
+    min-height: 100vh;
+    line-height: 1.45;
+  }
+
+  .nx-dash ul,
+  .nx-dash ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .nx-dash h1,
+  .nx-dash h2,
+  .nx-dash h3,
+  .nx-dash p,
+  .nx-dash pre {
+    margin: 0;
+  }
+
+  .nx-dash button,
+  .nx-dash input,
+  .nx-dash select,
+  .nx-dash textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  .nx-dash button {
+    cursor: pointer;
+    background: transparent;
+  }
+
+  .nx-dash button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .nx-dash a {
+    color: inherit;
+  }
+
+  .nx-dash .leaflet-container {
+    font-family: inherit;
+  }
+
+  .nx-dash .nx-markdown h2 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin: 0.75rem 0 0.25rem;
+    color: var(--color-slate-900);
+  }
+
+  .nx-dash .nx-markdown ul {
+    list-style: disc;
+    margin: 0.25rem 0;
+    padding-left: 1.1rem;
+  }
+
+  .nx-dash .nx-markdown p {
+    margin: 0.25rem 0;
+  }
+}
