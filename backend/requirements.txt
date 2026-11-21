@@ -10,6 +10,7 @@ torchvision
 Pillow
 opencv-python-headless
 numpy
+pandas>=2.2
 requests
 anthropic>=2.8
 openai>=1.100

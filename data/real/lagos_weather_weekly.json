@@ -1,0 +1,20 @@
+{
+  "source": "Open-Meteo Historical Weather API (ERA5/ERA5-Land reanalysis), CC BY 4.0; daily values at the LGA centre point, aggregated to ISO weeks",
+  "provider": "Open-Meteo Historical Weather API",
+  "url": "https://archive-api.open-meteo.com/v1/archive",
+  "licence": "CC BY 4.0",
+  "attribution": "Weather data by Open-Meteo.com",
+  "underlying_data": "ERA5 / ERA5-Land reanalysis (Copernicus Climate Change Service)",
+  "points": "Approximate LGA centre points (see backend/app/core/demo_seed.py)",
+  "daily_variables": [
+    "precipitation_sum",
+    "temperature_2m_mean",
+    "temperature_2m_max",
+    "relative_humidity_2m_mean"
+  ],
+  "aggregation": "ISO weeks (Mon-Sun); rainfall summed, temperature and humidity averaged; partial weeks dropped",
+  "start": "2016-01-04",
+  "end": "2026-11-08",
+  "retrieved_on": "2026-11-21",
+  "weekly_rows": 11320
+}

@@ -1,16 +1,26 @@
-"""Demo scenario seeding (Lagos). Later phases add weather, cases and stock.
+"""Demo scenario seeding (Lagos).
 
-Location names are the 20 real Lagos local government areas; their points
-are approximate centres compiled by hand, not an official boundary dataset.
-Facilities are fictional and marked SYNTHETIC.
+- Locations: the 20 real Lagos local government areas; their points are
+  approximate centres compiled by hand, not an official boundary dataset.
+- Facilities: fictional, marked SYNTHETIC.
+- Weather: REAL (Open-Meteo reanalysis) when data/real/lagos_weather_weekly.csv
+  exists, otherwise SYNTHETIC from a climatology.
+- Weekly malaria cases: always SYNTHETIC, driven by the weather, with the
+  scripted Ikorodu rise in the latest weeks.
 """
 
 from __future__ import annotations
 
 import math
+from datetime import date
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
+
+from backend.app.config import DATA_DIR
+from backend.app.core.surveillance import synthetic_cases, weather
+from backend.app.core.surveillance.metrics import CASES, WEATHER_METRICS
+from backend.app.core.surveillance.repository import bulk_insert_weekly, location_ids
 
 from backend.app.models import (
     AgentMessage,
@@ -128,7 +138,48 @@ def seed_places(session: Session) -> dict[str, int]:
     }
 
 
-def reset_and_seed(session: Session) -> dict[str, int]:
+WEATHER_CSV = DATA_DIR / "real" / "lagos_weather_weekly.csv"
+HISTORY_START = date(2016, 1, 4)  # a Monday
+
+
+def load_weather(today: date | None = None, csv_path=WEATHER_CSV):
+    """Weekly weather and its provenance: (frame, DataOrigin, source)."""
+    real = weather.load_weekly_csv(csv_path)
+    if real is not None and not real.empty:
+        meta = weather.load_metadata(csv_path) or {}
+        source = meta.get("source", weather.REAL_SOURCE)
+        if meta.get("retrieved_on"):
+            source += f"; retrieved {meta['retrieved_on']}"
+        return real, DataOrigin.REAL, source
+
+    last_week = weather.last_complete_week_start(today or date.today())
+    frame = weather.synthetic_weekly_weather(LAGOS_LGAS, HISTORY_START, last_week)
+    return frame, DataOrigin.SYNTHETIC, weather.SYNTHETIC_SOURCE
+
+
+def seed_surveillance(session: Session, today: date | None = None, csv_path=WEATHER_CSV) -> dict[str, object]:
+    ids = location_ids(session)
+    weekly_weather, weather_origin, weather_source = load_weather(today, csv_path)
+    weekly_weather = weekly_weather[weekly_weather["location"].isin(ids)]
+
+    weather_rows = bulk_insert_weekly(
+        session, weekly_weather, WEATHER_METRICS, ids, weather_origin, weather_source
+    )
+    cases = synthetic_cases.generate_cases(weekly_weather)
+    case_rows = bulk_insert_weekly(
+        session, cases, [CASES], ids, DataOrigin.SYNTHETIC, synthetic_cases.SOURCE
+    )
+    session.commit()
+    return {
+        "weather_rows": weather_rows,
+        "weather_origin": weather_origin.value,
+        "case_rows": case_rows,
+        "first_week": str(weekly_weather["week_start"].min()),
+        "last_week": str(weekly_weather["week_start"].max()),
+    }
+
+
+def reset_and_seed(session: Session) -> dict[str, object]:
     """Delete all scenario data and re-seed. Used by the demo reset action."""
     for model in (
         AgentMessage,
@@ -143,11 +194,14 @@ def reset_and_seed(session: Session) -> dict[str, int]:
     ):
         session.execute(delete(model))
     session.commit()
-    return seed_places(session)
+    counts = seed_places(session)
+    counts.update(seed_surveillance(session))
+    return counts
 
 
 def seed_if_empty(session: Session) -> bool:
     if session.scalar(select(func.count(Location.id))):
         return False
     seed_places(session)
+    seed_surveillance(session)
     return True

@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.core.demo_seed import reset_and_seed, seed_if_empty
+from backend.app.core.demo_seed import reset_and_seed, seed_if_empty, seed_places
 from backend.app.core.lab.records import (
     METRIC_SMEARS_POSITIVE,
     METRIC_SMEARS_REVIEWED,
@@ -45,7 +45,7 @@ def session():
     engine = make_engine("sqlite://")
     init_db(engine)
     with Session(engine) as s:
-        seed_if_empty(s)
+        seed_places(s)  # places only: weather/case history is not needed here
         yield s
 
 
@@ -72,7 +72,14 @@ def submit(session, **overrides):
 
 
 def observations(session):
-    return list(session.scalars(select(Observation).order_by(Observation.metric)))
+    """Lab-derived observations only (seeding also creates weather and cases)."""
+    return list(
+        session.scalars(
+            select(Observation)
+            .where(Observation.metric.in_([METRIC_SMEARS_POSITIVE, METRIC_SMEARS_REVIEWED]))
+            .order_by(Observation.metric)
+        )
+    )
 
 
 def test_seed_creates_lagos_scenario(session):

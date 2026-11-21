@@ -36,7 +36,27 @@ The project combines a PyTorch image classification model with a FastAPI backend
 4. The existing classification model predicts a class for each crop.
 5. The backend returns the candidate-region results, counts, and an annotated image.
 
-### 3. Laboratory review workflow
+### 3. Environmental and historical surveillance (Module 1)
+
+Weekly data for the 20 Lagos local government areas, 2016 to the latest full week:
+
+| Data | Origin | Source |
+|---|---|---|
+| Rainfall, mean/max temperature, relative humidity | **REAL** (reanalysis) | Open-Meteo Historical Weather API, ERA5/ERA5-Land reanalysis, at each LGA's approximate centre point. Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0). Reanalysis is modelled from observations; it is not a rain-gauge record. |
+| Weekly confirmed malaria cases | **SYNTHETIC** | Public weekly case data per LGA is not available, so cases are generated from the real weather (rainfall 3–8 weeks earlier, temperature) with a scripted demo rise in Ikorodu over the latest 6 weeks. |
+| Verified lab-positive smears | From Module 5 | Only results verified by a qualified reviewer. |
+
+For each location, the surveillance view compares the latest weeks with the same time of year in earlier years: cases against the seasonal baseline, the 4-week case trend against the usual seasonal trend, 8-week rainfall against normal, temperature suitability (context only) and verified lab positives. A signal is raised only when the change is unusual for that series *and* large in relative and absolute terms. These levels describe current conditions; forecasts and risk scores come from the prediction engine (Module 2).
+
+The weather file is committed in `data/real/`. To refresh it (about 3–4 minutes, no API key):
+
+```powershell
+python -m backend.scripts.fetch_weather
+```
+
+Then reset the demo data (`POST /api/demo/seed`). Without the file, the app falls back to synthetic weather and labels it SYNTHETIC.
+
+### 4. Laboratory review workflow
 
 1. After a whole-smear analysis, the lab worker chooses **Submit for review**, picking the laboratory, sample date and (optionally) a slide number. No patient names or identifiers are collected.
 2. The submission is stored as **PENDING_REVIEW**. Uploads are labelled **SYNTHETIC** unless the submitter ticks that it is a real sample from that laboratory.
@@ -252,6 +272,9 @@ The FastAPI backend exposes the following endpoints.
 | POST | `/api/lab/submissions/{id}/review` | Qualified review: `VERIFIED` (with the reviewer's own POSITIVE/NEGATIVE reading) or `REJECTED` (with a reason) |
 | GET | `/api/lab/model-card` | Model description, training data, limitations and metrics status |
 | GET | `/api/locations`, `/api/facilities` | Monitored Lagos LGAs and participating facilities |
+| GET | `/api/surveillance/overview` | Current surveillance level and key signals for every LGA |
+| GET | `/api/surveillance/locations/{id}` | Signals plus weekly series (cases, rainfall, temperature, humidity, verified lab results); `?weeks=156` |
+| GET | `/api/surveillance/sources` | Every dataset held: real or synthetic, source, coverage |
 | POST | `/api/demo/seed` | **Deletes all scenario data** and re-seeds the demo Lagos scenario |
 | POST | `/api/treatment/recommend` | Rule-based treatment decision support (side page) |
 | POST | `/api/agent/treatment-report` | AI explanation of the treatment assessment |

@@ -11,7 +11,7 @@ from backend.app.config import get_settings
 from backend.app.core.lab.inference import get_model
 from backend.app.core.demo_seed import seed_if_empty
 from backend.app.db import SessionLocal, init_db
-from backend.app.modules import demo, lab, places, system, treatment
+from backend.app.modules import demo, lab, places, surveillance, system, treatment
 
 
 @asynccontextmanager
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system.router)
     app.include_router(places.router)
+    app.include_router(surveillance.router)
     app.include_router(lab.router)
     app.include_router(demo.router)
     app.include_router(treatment.router)
